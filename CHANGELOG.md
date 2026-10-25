@@ -3,6 +3,46 @@
 All notable changes to indic-er. Phases follow the build order in
 [PLAN.md](PLAN.md).
 
+## Phase 2 — Matching pipeline
+
+- **Pairwise features** (`app/core/features.py`): name spelling, name sound,
+  name distinctiveness, address core, pincode, landmark and phone. Two
+  governing rules — a missing field returns `None` and is dropped from both
+  sides of the weighted mean, so absence is neutral; and names are compared by
+  greedy token alignment, so reordering and dropped middle names cost nothing
+  while an initial against a full token scores 0.90.
+- **Weights rebalanced** so the name features sum to 0.46, below the 0.72
+  merge threshold: two different people called Jayesh Patel cannot be merged
+  on their name alone. The name-only corollary is documented and measured.
+- **Blocking** (`app/core/blocking.py`): five keys chosen so a true pair stays
+  reachable when several fields are wrong. Oversized blocks are skipped rather
+  than truncated, because truncation silently strands specific records.
+- **Clustering** (`app/core/cluster.py`): connected components plus a conflict
+  check. When two cluster members disagree on hard evidence, the weakest
+  `same_as` edge on the path between them is cut — unless it scores above the
+  override threshold, or a reviewer confirmed it, in which case the conflict is
+  reported rather than acted on.
+- **Canonical records** with merge provenance per member pair, every name
+  variant, every source script, and the most complete address in the cluster.
+- **Baseline** (`app/core/baseline.py`): exact match plus Jaro-Winkler on raw
+  strings, blocked on two characters. Implemented properly rather than
+  strawmanned — it catches a trailing suffix and a plain typo, and fails on a
+  leading honorific, a script change and Patel/Patil.
+- **Review queue** (`app/core/review.py`): SQLite-backed, ordered by
+  uncertainty, applied as hard overrides before clustering on the next run. A
+  decided pair never returns to the queue. `threshold_shift()` reports where
+  the accumulated decisions say the threshold should be, and says so honestly
+  when the decisions overlap and no threshold can reproduce them.
+- **Explanations** (`app/core/explain.py`): deterministic, rule-based,
+  per-feature contributions plus a sentence that names the strongest and
+  weakest evidence, says what could not be compared, and ranks an exact phone
+  or pincode match above three middling name features because that is how a
+  reviewer weighs it.
+- **Pipeline** (`app/core/pipeline.py`): `resolve()` end to end with stage
+  timings and a duplicate rate; `match_two()` scores any two records directly,
+  including pairs blocking would never propose.
+- 324 tests, 97% coverage on `app/core`.
+
 ## Phase 1 — Normalization
 
 - **Script detection** (`app/core/script_detect.py`) for Latin, Devanagari,

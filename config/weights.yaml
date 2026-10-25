@@ -10,30 +10,41 @@
 # (a field is missing on either side). None features are DROPPED and the
 # remaining weights renormalise, so a record with no phone is not punished
 # for the absence — only for a disagreement.
+#
+# The name weights sum to 0.46, deliberately BELOW `auto_merge`. Two different
+# people called Jayesh Patel exist in every Indian dataset, so a perfect name
+# agreement must not be able to reach the merge threshold on its own: with the
+# address, pincode and phone all disagreeing, such a pair scores 0.46 and is
+# rejected. Identity has to be carried by something other than the name.
+#
+# The corollary, and a real limitation: when a pair has *nothing but* names —
+# both records missing address and phone — the name weights renormalise to 1.0
+# and an identical name does merge. On name-only data that is the only
+# available answer, and the eval report measures it as its own slice.
 features:
   name_string:
-    weight: 0.26
+    weight: 0.18
     description: Token-set similarity on the normalized Latin name.
   name_phonetic:
-    weight: 0.30
+    weight: 0.22
     description: Agreement of Indic phonetic keys, matched token to token.
   name_rarity:
-    weight: 0.08
+    weight: 0.06
     description: >
       Penalises a name agreement carried only by a very common surname.
       1.0 when at least one matching token is distinctive, lower when the
       only shared token is Patel/Shah/Kumar-class.
   address_core:
-    weight: 0.16
+    weight: 0.24
     description: Order-tolerant similarity of house/building/locality tokens.
   pincode:
-    weight: 0.10
+    weight: 0.14
     description: 1.0 exact, 0.5 same sorting district, 0.0 otherwise.
   landmark:
-    weight: 0.04
+    weight: 0.06
     description: Landmark phrase agreement after abbreviation expansion.
   phone:
-    weight: 0.06
+    weight: 0.10
     description: 1.0 when the normalized last-10 digits are equal, else 0.0.
 
 # --------------------------------------------------------------------------- #
