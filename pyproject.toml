@@ -1,0 +1,52 @@
+[project]
+name = "indic-er"
+version = "0.5.0"
+description = "Entity resolution for messy Indian names, businesses and addresses (proof of value)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "pyyaml>=6.0",
+    "rapidfuzz>=3.9",
+    "networkx>=3.3",
+    "rdflib>=7.0",
+    "jinja2>=3.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.2", "pytest-cov>=5.0", "ruff>=0.5", "httpx>=0.27"]
+llm = ["anthropic>=0.34"]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4", "RET", "PTH"]
+ignore = ["B008", "RET504"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
+"data/generate.py" = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.coverage.run]
+source = ["app/core"]
+omit = ["*/__init__.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "@abstractmethod",
+]

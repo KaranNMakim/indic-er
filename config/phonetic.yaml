@@ -1,0 +1,99 @@
+# Indic-tuned phonetic key.
+#
+# Soundex and Metaphone were built for English and get Indian names wrong in
+# predictable ways: they keep aspirate distinctions that transliteration
+# invents (Patel/Pathel), split sibilants that Indic speakers merge
+# (Shah/Sah/Chah), and treat the semivowel `y` as a consonant so
+# Jayesh/Jaishe/Jaysh land in three different buckets.
+#
+# This key is built in five documented stages (app/core/phonetic.py):
+#   1. lowercase, strip to a-z
+#   2. apply `digraphs` in order (aspirate + cluster folding)
+#   3. map each character through `char_classes`
+#   4. collapse runs of the same class
+#   5. drop vowel classes, keeping one marker for a word-initial vowel
+#
+# Worked examples (asserted in tests/test_phonetic.py):
+#   Patel / Patil / Pattel / Pateel  -> PTL
+#   Jayesh / Jaishe / Jaysh / Jayes  -> JS
+#   Shah / Sah / Chah / Shaha        -> S
+#   Lakshmi / Laxmi / Lakshmee       -> LKSM
+#   Agarwal / Aggarwal / Agrawal     -> AGRWL
+
+# Stage 2: ordered rewrite rules. Longest patterns first; applied as a single
+# left-to-right pass so a rule never re-reads its own output.
+digraphs:
+  - ["chh", "ch"]
+  - ["ksh", "ks"]
+  - ["shh", "sh"]
+  - ["sch", "sh"]
+  - ["tch", "ch"]
+  - ["zh", "j"]      # Tamil ழ
+  - ["bh", "b"]
+  - ["dh", "d"]
+  - ["gh", "g"]
+  - ["jh", "j"]
+  - ["kh", "k"]
+  - ["th", "t"]
+  - ["ph", "f"]
+  - ["ck", "k"]
+  - ["sh", "s"]
+  - ["ch", "s"]      # sibilant folding: Shah ~ Sah ~ Chah
+  - ["x", "ks"]
+  - ["z", "j"]       # Zamindar ~ Jamindar
+  - ["w", "v"]
+  - ["q", "k"]
+  - ["c", "k"]       # bare c is hard after ch/ck are consumed
+
+# Stage 3: equivalence classes. Characters mapped to the same symbol are
+# treated as the same sound.
+char_classes:
+  a: "V"
+  e: "V"
+  i: "V"
+  o: "V"
+  u: "V"
+  y: "V"   # semivowel: a vowel unless word-initial (see semivowel_initial)
+  h: ""    # weak: dropped unless word-initial
+  b: "B"
+  v: "W"   # v and w fold together; kept distinct from b (see notes below)
+  p: "P"
+  f: "P"   # ph -> f -> P : Phone ~ Fone
+  t: "T"
+  d: "D"
+  k: "K"
+  g: "G"
+  j: "J"
+  s: "S"
+  l: "L"
+  r: "R"
+  n: "N"
+  m: "M"
+
+# Classes treated as vowels in stage 5.
+vowel_classes: ["V"]
+
+# `y` word-initial is a real consonant (Yadav, Yogesh) — keep it.
+semivowel_initial:
+  y: "Y"
+
+# `h` word-initial is a real consonant (Hemant, Harsh) — keep it.
+consonant_initial:
+  h: "H"
+
+# Stage 5: a word-initial vowel becomes this marker, so Agarwal keeps its
+# leading sound and does not collide with Garwal.
+initial_vowel_marker: "A"
+
+collapse_repeats: true
+
+# Fall back to the uppercased first letter if the pipeline yields nothing.
+min_key_length: 1
+
+# Deliberately NOT folded, and why:
+#   b / v  -> Vora~Bora is a genuine variant pair, but folding b into v also
+#             collides many unrelated names. Precision wins for a KYC-shaped
+#             use case; the eval report counts the misses.
+#   t / d  -> retroflex confusion exists but folding it merges Patel~Padel.
+#   n / m  -> kept separate; nasal confusion is rare in transliteration.
+notes_only: true

@@ -1,0 +1,133 @@
+# Scoring weights, decision bands, blocking and conflict rules.
+#
+# This is the file a solutions engineer tunes per customer. Nothing here
+# requires a code change.
+
+# --------------------------------------------------------------------------- #
+# Pairwise features
+# --------------------------------------------------------------------------- #
+# Each feature returns a value in [0,1] or None when it cannot be computed
+# (a field is missing on either side). None features are DROPPED and the
+# remaining weights renormalise, so a record with no phone is not punished
+# for the absence — only for a disagreement.
+features:
+  name_string:
+    weight: 0.26
+    description: Token-set similarity on the normalized Latin name.
+  name_phonetic:
+    weight: 0.30
+    description: Agreement of Indic phonetic keys, matched token to token.
+  name_rarity:
+    weight: 0.08
+    description: >
+      Penalises a name agreement carried only by a very common surname.
+      1.0 when at least one matching token is distinctive, lower when the
+      only shared token is Patel/Shah/Kumar-class.
+  address_core:
+    weight: 0.16
+    description: Order-tolerant similarity of house/building/locality tokens.
+  pincode:
+    weight: 0.10
+    description: 1.0 exact, 0.5 same sorting district, 0.0 otherwise.
+  landmark:
+    weight: 0.04
+    description: Landmark phrase agreement after abbreviation expansion.
+  phone:
+    weight: 0.06
+    description: 1.0 when the normalized last-10 digits are equal, else 0.0.
+
+# --------------------------------------------------------------------------- #
+# Decision bands
+# --------------------------------------------------------------------------- #
+# >= auto_merge            -> same_as edge, decision "merge"
+# review_low .. auto_merge -> review queue, decision "review"
+# < review_low             -> dropped, decision "reject"
+#
+# Defaults are deliberately conservative: for a KYC-shaped use case a false
+# merge costs far more than a missed one, and the borderline band is where the
+# human reviewer earns their keep.
+thresholds:
+  auto_merge: 0.72
+  review_low: 0.55
+
+# --------------------------------------------------------------------------- #
+# Blocking
+# --------------------------------------------------------------------------- #
+# Candidate pairs are generated from these keys only. Without blocking, 5,000
+# records is 12.5M pairs; with it, a few tens of thousands.
+blocking:
+  strategies:
+    - name: phonetic_first_token
+      description: First phonetic token of the name.
+      enabled: true
+    - name: phonetic_sorted
+      description: All phonetic tokens, sorted and joined — order-insensitive.
+      enabled: true
+    - name: phonetic_token_any
+      description: Any single phonetic token (catches dropped middle names).
+      enabled: true
+    - name: pincode
+      description: Exact pincode.
+      enabled: true
+    - name: phone_last10
+      description: Normalized last 10 digits of the phone.
+      enabled: true
+    - name: locality_phonetic
+      description: Phonetic key of the locality token.
+      enabled: false
+  # A block larger than this is skipped: "Patel in 380008" can be thousands of
+  # records and the all-pairs cost inside one block is quadratic. Records in an
+  # oversized block are still reachable through their more selective keys.
+  max_block_size: 120
+  # Hard cap on candidate pairs, so a pathological input cannot hang the demo.
+  max_candidate_pairs: 400000
+
+# --------------------------------------------------------------------------- #
+# Conflict rules (cluster-level)
+# --------------------------------------------------------------------------- #
+# Connected components over-merge when a hub record bridges two real entities.
+# After components are formed, a component is split when a member pair trips a
+# conflict rule. Each rule names the evidence that must disagree.
+conflicts:
+  enabled: true
+  rules:
+    - name: different_pincode_and_phone
+      description: Two different valid pincodes AND two different phones.
+      requires: [pincode_differs, phone_differs]
+    - name: different_phone_strong
+      description: Both sides have a phone, they differ, and the address is weak.
+      requires: [phone_differs, address_weak]
+  # A pair must score at least this well to survive a tripped conflict rule.
+  override_score: 0.92
+  address_weak_below: 0.45
+
+# --------------------------------------------------------------------------- #
+# Baseline (for the comparison the stakeholder actually cares about)
+# --------------------------------------------------------------------------- #
+baseline:
+  exact_threshold: 1.0
+  # Jaro-Winkler on the RAW name string: no normalization, no phonetics.
+  fuzzy_threshold: 0.88
+  description: >
+    What a team gets from a weekend of work: exact match, then Jaro-Winkler
+    on raw name strings, blocked on the first two characters.
+
+# --------------------------------------------------------------------------- #
+# Canonical record selection
+# --------------------------------------------------------------------------- #
+canonical:
+  # How the surviving name is chosen from a cluster.
+  name_strategy: most_complete   # most_complete | most_frequent | longest
+  # Prefer a Latin-script name for the canonical form; originals are kept as
+  # provenance either way.
+  prefer_latin: true
+
+# --------------------------------------------------------------------------- #
+# Review queue
+# --------------------------------------------------------------------------- #
+review:
+  # Pairs shown per page in the web UI.
+  page_size: 25
+  # `uncertainty` puts the pairs closest to the decision boundary first, which
+  # is where a reviewer's time is worth the most.
+  order: uncertainty   # uncertainty | score_desc | score_asc

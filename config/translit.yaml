@@ -1,0 +1,252 @@
+# Rule-based Indic -> Latin transliteration tables.
+#
+# Deliberately NOT a trained model: deterministic, offline, inspectable, and
+# good enough because the phonetic key downstream absorbs the residual
+# disagreement (see PLAN.md assumption 3).
+#
+# Each script block has:
+#   independent : standalone vowel letters
+#   consonants  : consonant -> Latin base (WITHOUT the inherent vowel)
+#   matras      : dependent vowel signs
+#   virama      : character that suppresses the inherent vowel
+#   signs       : anusvara / chandrabindu / visarga and friends
+#   inherent    : the vowel implied by a bare consonant
+#   drop_final_inherent : Hindi-style schwa deletion (राम -> ram, not rama)
+
+scripts:
+  devanagari:
+    range: ["ऀ", "ॿ"]
+    inherent: "a"
+    drop_final_inherent: true
+    virama: "्"
+    independent:
+      "अ": "a"
+      "आ": "a"
+      "इ": "i"
+      "ई": "i"
+      "उ": "u"
+      "ऊ": "u"
+      "ऋ": "ri"
+      "ए": "e"
+      "ऐ": "ai"
+      "ओ": "o"
+      "औ": "au"
+    matras:
+      "ा": "a"
+      "ि": "i"
+      "ी": "i"
+      "ु": "u"
+      "ू": "u"
+      "ृ": "ri"
+      "े": "e"
+      "ै": "ai"
+      "ो": "o"
+      "ौ": "au"
+      "ॉ": "o"
+      "ॅ": "e"
+    consonants:
+      "क": "k"
+      "ख": "kh"
+      "ग": "g"
+      "घ": "gh"
+      "ङ": "ng"
+      "च": "ch"
+      "छ": "chh"
+      "ज": "j"
+      "झ": "jh"
+      "ञ": "ny"
+      "ट": "t"
+      "ठ": "th"
+      "ड": "d"
+      "ढ": "dh"
+      "ण": "n"
+      "त": "t"
+      "थ": "th"
+      "द": "d"
+      "ध": "dh"
+      "न": "n"
+      "प": "p"
+      "फ": "ph"
+      "ब": "b"
+      "भ": "bh"
+      "म": "m"
+      "य": "y"
+      "र": "r"
+      "ल": "l"
+      "ळ": "l"
+      "व": "v"
+      "श": "sh"
+      "ष": "sh"
+      "स": "s"
+      "ह": "h"
+      "क़": "q"
+      "ख़": "kh"
+      "ग़": "g"
+      "ज़": "z"
+      "ड़": "r"
+      "ढ़": "rh"
+      "फ़": "f"
+    signs:
+      "ं": "n"
+      "ँ": "n"
+      "ः": "h"
+      "़": ""
+      "ऽ": ""
+      "॰": ""
+
+  gujarati:
+    range: ["઀", "૿"]
+    inherent: "a"
+    drop_final_inherent: true
+    virama: "્"
+    independent:
+      "અ": "a"
+      "આ": "a"
+      "ઇ": "i"
+      "ઈ": "i"
+      "ઉ": "u"
+      "ઊ": "u"
+      "ઋ": "ri"
+      "એ": "e"
+      "ઐ": "ai"
+      "ઓ": "o"
+      "ઔ": "au"
+    matras:
+      "ા": "a"
+      "િ": "i"
+      "ી": "i"
+      "ુ": "u"
+      "ૂ": "u"
+      "ૃ": "ri"
+      "ે": "e"
+      "ૈ": "ai"
+      "ો": "o"
+      "ૌ": "au"
+      "ૉ": "o"
+      "ૅ": "e"
+    consonants:
+      "ક": "k"
+      "ખ": "kh"
+      "ગ": "g"
+      "ઘ": "gh"
+      "ઙ": "ng"
+      "ચ": "ch"
+      "છ": "chh"
+      "જ": "j"
+      "ઝ": "jh"
+      "ઞ": "ny"
+      "ટ": "t"
+      "ઠ": "th"
+      "ડ": "d"
+      "ઢ": "dh"
+      "ણ": "n"
+      "ત": "t"
+      "થ": "th"
+      "દ": "d"
+      "ધ": "dh"
+      "ન": "n"
+      "પ": "p"
+      "ફ": "ph"
+      "બ": "b"
+      "ભ": "bh"
+      "મ": "m"
+      "ય": "y"
+      "ર": "r"
+      "લ": "l"
+      "ળ": "l"
+      "વ": "v"
+      "શ": "sh"
+      "ષ": "sh"
+      "સ": "s"
+      "હ": "h"
+    signs:
+      "ં": "n"
+      "ઁ": "n"
+      "ઃ": "h"
+      "઼": ""
+
+  tamil:
+    range: ["஀", "௿"]
+    inherent: "a"
+    drop_final_inherent: false
+    virama: "்"
+    independent:
+      "அ": "a"
+      "ஆ": "a"
+      "இ": "i"
+      "ஈ": "i"
+      "உ": "u"
+      "ஊ": "u"
+      "எ": "e"
+      "ஏ": "e"
+      "ஐ": "ai"
+      "ஒ": "o"
+      "ஓ": "u"
+      "ஔ": "au"
+    matras:
+      "ா": "a"
+      "ி": "i"
+      "ீ": "i"
+      "ு": "u"
+      "ூ": "u"
+      "ெ": "e"
+      "ே": "e"
+      "ை": "ai"
+      "ொ": "o"
+      "ோ": "u"
+      "ௌ": "au"
+    consonants:
+      "க": "k"
+      "ங": "ng"
+      "ச": "ch"
+      "ஞ": "ny"
+      "ட": "t"
+      "ண": "n"
+      "த": "th"
+      "ந": "n"
+      "ப": "p"
+      "ம": "m"
+      "ய": "y"
+      "ர": "r"
+      "ல": "l"
+      "வ": "v"
+      "ழ": "zh"
+      "ள": "l"
+      "ற": "r"
+      "ன": "n"
+      "ஜ": "j"
+      "ஶ": "sh"
+      "ஷ": "sh"
+      "ஸ": "s"
+      "ஹ": "h"
+      "க்ஷ": "ksh"
+    signs:
+      "ஂ": "n"
+      "ஃ": "h"
+      "ௐ": "om"
+
+# Latin-script spellings that are themselves transliteration variants and get
+# folded before phonetics. Keeps the phonetic rules from carrying every case.
+#
+# The `amadavad` / `mumbaii` style entries also absorb internal schwa: this
+# transliterator deletes the word-final inherent vowel (Hindi/Gujarati schwa
+# deletion) but not word-internal ones, so अमदावाद comes out "amadavad".
+# The phonetic key is vowel-blind and does not care, but the Latin form and
+# the address features do, so the variants are folded here by name.
+latin_variants:
+  amdavad: ahmedabad
+  amadavad: ahmedabad
+  ahamadabad: ahmedabad
+  ahmdabad: ahmedabad
+  ahemdabad: ahmedabad
+  bombay: mumbai
+  bangalore: bengaluru
+  calcutta: kolkata
+  madras: chennai
+  poona: pune
+  baroda: vadodara
+  mysore: mysuru
+  trivandrum: thiruvananthapuram
+  cochin: kochi
+  gurgaon: gurugram
+  pondicherry: puducherry

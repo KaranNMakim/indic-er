@@ -1,0 +1,247 @@
+# Indian address parsing knowledge.
+#
+# Indian addresses are landmark-relative, abbreviation-heavy and have no
+# reliable field order. This file holds the vocabulary; app/core/address.py
+# holds the parser.
+
+pincode:
+  pattern: "^[1-9][0-9]{5}$"
+  # Allow "380 008" / "380-008" in raw text before validating.
+  loose_pattern: "(?<![0-9])([1-9][0-9]{2})[\\s-]?([0-9]{3})(?![0-9])"
+  # First 3 digits identify the sorting district — a useful soft signal when
+  # two pincodes differ but are plausibly the same area.
+  district_prefix_length: 3
+
+# Expanded before tokenisation. Keys are matched as whole tokens, with or
+# without a trailing dot.
+abbreviations:
+  soc: society
+  socy: society
+  "soc.": society
+  society: society
+  apt: apartment
+  apts: apartment
+  aptt: apartment
+  flts: flats
+  flt: flat
+  bldg: building
+  blg: building
+  bld: building
+  rd: road
+  "rd.": road
+  st: street
+  str: street
+  ln: lane
+  gali: lane
+  galli: lane
+  mg: mahatma gandhi
+  "m.g": mahatma gandhi
+  "m g": mahatma gandhi
+  nr: near
+  "nr.": near
+  opp: opposite
+  "opp.": opposite
+  behind: behind
+  bh: behind
+  nxt: next
+  adj: adjacent
+  blk: block
+  sec: sector
+  sect: sector
+  ph: phase
+  no: number
+  "no.": number
+  "nos.": number
+  plt: plot
+  gr: ground
+  grd: ground
+  flr: floor
+  fl: floor
+  "1st": first
+  "2nd": second
+  "3rd": third
+  "4th": fourth
+  ngr: nagar
+  ngar: nagar
+  colony: colony
+  cly: colony
+  chs: cooperative housing society
+  chsl: cooperative housing society
+  co-op: cooperative
+  coop: cooperative
+  twp: township
+  vihar: vihar
+  pkwy: parkway
+  crs: cross
+  mn: main
+  hsg: housing
+  res: residency
+  resi: residency
+  ent: enclave
+  encl: enclave
+  gdn: garden
+  gdns: garden
+  pk: park
+  mkt: market
+  tmpl: temple
+  mndr: mandir
+  mandir: temple
+  masjid: mosque
+  gurudwara: gurudwara
+  derasar: temple
+  "ch.": chowk
+  chk: chowk
+  xing: crossing
+  tal: taluka
+  dist: district
+  "dist.": district
+  po: post office
+  "p.o": post office
+  ps: police station
+  "p.s": police station
+  gj: gujarat
+  mh: maharashtra
+  tn: tamil nadu
+  up: uttar pradesh
+  ka: karnataka
+  dl: delhi
+
+# Tokens that introduce a landmark phrase. Everything up to the next comma is
+# captured as the landmark.
+landmark_markers:
+  - near
+  - opposite
+  - behind
+  - beside
+  - next
+  - adjacent
+  - above
+  - below
+  - back
+  - front
+  - facing
+
+# Words that carry no identifying signal and are dropped from the match core.
+stopwords:
+  - number
+  - flat
+  - floor
+  - ground
+  - block
+  - wing
+  - plot
+  - survey
+  - the
+  - at
+  - of
+  - and
+  - to
+  - in
+  - india
+  - bharat
+  - po
+  - post
+  - office
+  - district
+  - taluka
+  - state
+
+# Tokens that mark a building/society name, used to find where it starts.
+building_markers:
+  - society
+  - apartment
+  - apartments
+  - flats
+  - building
+  - tower
+  - towers
+  - complex
+  - residency
+  - nivas
+  - bhavan
+  - bhuvan
+  - heights
+  - enclave
+  - cooperative
+  - housing
+  - chawl
+  - wadi
+  - estate
+  - villa
+  - villas
+  - park
+  - plaza
+  - arcade
+  - mansion
+  - house
+
+# Tokens that mark a locality.
+locality_markers:
+  - nagar
+  - colony
+  - vihar
+  - puram
+  - pura
+  - pur
+  - ganj
+  - bagh
+  - layout
+  - extension
+  - sector
+  - phase
+  - township
+  - peth
+  - pet
+  - halli
+  - wadi
+  - khurd
+  - kalan
+
+# Known cities, with the aliases that real data uses. Used to pull the city
+# out of an unordered address and to fold spelling variants.
+cities:
+  ahmedabad: [amdavad, ahmdabad, ahemdabad, a'bad, abad]
+  mumbai: [bombay, mumbaii, bombai]
+  pune: [poona, puna]
+  surat: [surath]
+  vadodara: [baroda, barodra]
+  rajkot: []
+  bengaluru: [bangalore, bangaluru, banglore]
+  chennai: [madras]
+  hyderabad: [hydrabad, secunderabad]
+  kolkata: [calcutta, kolkatta]
+  delhi: [new delhi, dilli, "n delhi"]
+  gurugram: [gurgaon]
+  noida: []
+  jaipur: [jaypur]
+  lucknow: [lakhnau]
+  indore: []
+  bhopal: []
+  nagpur: []
+  coimbatore: [kovai]
+  madurai: []
+  kochi: [cochin, ernakulam]
+  thiruvananthapuram: [trivandrum]
+  visakhapatnam: [vizag]
+  bhavnagar: []
+  jamnagar: []
+  gandhinagar: []
+  anand: []
+  nadiad: []
+  mehsana: []
+
+states:
+  gujarat: [gj, guj]
+  maharashtra: [mh, maha]
+  karnataka: [ka, karnatak]
+  tamil nadu: [tn, tamilnadu]
+  delhi: [dl, nct delhi]
+  rajasthan: [rj]
+  uttar pradesh: [up]
+  madhya pradesh: [mp]
+  telangana: [tg, ts]
+  kerala: [kl]
+  west bengal: [wb]
+  andhra pradesh: [ap]
+  haryana: [hr]
+  punjab: [pb]

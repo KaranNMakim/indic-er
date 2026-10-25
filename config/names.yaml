@@ -1,0 +1,245 @@
+# Honorifics, suffixes and name-level domain knowledge.
+#
+# Everything here is data, not code: add a term and re-run, no deploy.
+
+# Stripped when they appear as a standalone token anywhere in the name.
+honorifics:
+  - shri
+  - sri
+  - shree
+  - smt
+  - smt.
+  - srimati
+  - shrimati
+  - sou
+  - kum
+  - kumari
+  - mr
+  - mrs
+  - ms
+  - miss
+  - dr
+  - doctor
+  - prof
+  - professor
+  - er
+  - adv
+  - advocate
+  - ca
+  - shrimant
+  - thiru
+  - thirumathi
+  - selvi
+  - janab
+  - haji
+  - sardar
+  - sardarji
+  - pandit
+  - pt
+  - swami
+  - maulana
+  - rev
+  - late
+  - m/s
+  - messrs
+
+# Stripped when they appear as a *trailing* fragment of a token.
+# "Jayeshbhai" -> "Jayesh", "Kokilaben" -> "Kokila", "Rameshji" -> "Ramesh".
+# Minimum stem length guards against destroying short real names.
+affectionate_suffixes:
+  # The "a"-prefixed forms absorb Indic internal schwa. સુરેશભાઈ is a
+  # consonant-final stem (સુરેશ) plus ભાઈ, which transliterates to
+  # "sureshabhai" — so "abhai" is the suffix to strip.
+  #
+  # There is deliberately no "aben": બેન attaches to female names that almost
+  # always END in a long vowel (કોકિલા, ભાવના), so the 'a' in "kokilaben"
+  # belongs to the stem. Stripping "aben" would turn Kokila into "kokil".
+  - abhai
+  - aji
+  - bhai
+  - bhaii
+  - bai
+  - ben
+  - behn
+  - bhen
+  - ji
+  - jee
+  - kaka
+  - kaki
+  - mama
+  - masi
+  - anna
+  - akka
+  - amma
+  - appa
+  - da
+  - didi
+  - saheb
+  - sahib
+  - sab
+  - singh_ji
+
+# Guard: do not strip a suffix if the remaining stem would be shorter than this.
+min_stem_length: 3
+
+# Regexes removed from the raw name before tokenisation, for honorifics that
+# contain punctuation and so cannot survive as a single token ("M/s Shah").
+strip_patterns:
+  - '\bm\s*/\s*s\b'
+  - '\bmessrs\b'
+  - '\bc\s*/\s*o\b'
+
+# Tokens never stripped as a suffix even if they end with one of the above
+# (real names that happen to end in a suffix-like string).
+suffix_exceptions:
+  - jiji
+  - benji
+  - raja
+  - maja
+  - banda
+  - panda
+  - nanda
+  - gouda
+  - gowda
+  - handa
+  - chanda
+  - govinda
+  - bhagwanda
+  - sarada
+  - veda
+  - juneja
+  - ahuja
+  - bajaj
+
+# Business legal / trade suffixes. Captured into `legal_suffix`, removed from the
+# matched name: "Patel Trading Pvt Ltd" and "Patel Trading & Sons" should still
+# pair strongly on "Patel Trading", but the suffix itself is weak evidence.
+business_suffixes:
+  - pvt ltd
+  - pvt. ltd.
+  - private limited
+  - pvt limited
+  - ltd
+  - limited
+  - llp
+  - llc
+  - inc
+  - incorporated
+  - corp
+  - corporation
+  - co
+  - company
+  - "& co"
+  - "and co"
+  - "& sons"
+  - "and sons"
+  - "& brothers"
+  - "and brothers"
+  - bros
+  - brothers
+  - enterprise
+  - enterprises
+  - industries
+  - industry
+  - traders
+  - trading
+  - trading company
+  - agency
+  - agencies
+  - stores
+  - store
+  - emporium
+  - mart
+  - supermart
+  - general stores
+  - provision stores
+  - kirana
+  - kirana store
+  - textiles
+  - textile mills
+  - mills
+  - exports
+  - imports
+  - export import
+  - impex
+  - sales
+  - sales corporation
+  - marketing
+  - distributors
+  - distributor
+  - associates
+  - group
+  - udyog
+  - vyapar
+  - bhandar
+  - stores pvt ltd
+
+# Surnames so common in India that name similarity alone is near-worthless
+# evidence. The `name_rarity` feature downweights pairs whose only name
+# agreement is one of these.
+common_surnames:
+  - patel
+  - patil
+  - shah
+  - kumar
+  - singh
+  - sharma
+  - verma
+  - gupta
+  - mehta
+  - desai
+  - joshi
+  - trivedi
+  - modi
+  - soni
+  - prajapati
+  - thakkar
+  - vyas
+  - pandya
+  - rao
+  - reddy
+  - naidu
+  - nair
+  - menon
+  - pillai
+  - iyer
+  - iyengar
+  - krishnan
+  - subramanian
+  - das
+  - dey
+  - ghosh
+  - chatterjee
+  - banerjee
+  - mukherjee
+  - yadav
+  - jain
+  - agarwal
+  - aggarwal
+  - bansal
+  - khan
+  - sheikh
+  - ansari
+  - qureshi
+  - gowda
+  - shetty
+  - hegde
+  - kulkarni
+  - deshpande
+  - jadhav
+  - pawar
+  - shinde
+  - more
+  - chavan
+
+# Given names that are also common surnames — do not treat a token as a
+# surname signal purely by position when it is in this list.
+ambiguous_tokens:
+  - kumar
+  - singh
+  - lal
+  - chand
+  - prasad
+  - devi
+  - bai
+  - ram

@@ -1,0 +1,120 @@
+# indic-er ontology
+#
+# Loaded and validated at startup by app/kg/ontology.py, exported to JSON-LD
+# and Turtle via rdflib. Edit here, not in code.
+
+name: indic-er
+version: 0.5.0
+namespace: "https://indic-er.dev/ontology#"
+prefixes:
+  ier: "https://indic-er.dev/ontology#"
+  rdfs: "http://www.w3.org/2000/01/rdf-schema#"
+  owl: "http://www.w3.org/2002/07/owl#"
+  xsd: "http://www.w3.org/2001/XMLSchema#"
+
+classes:
+  Person:
+    label: Person
+    description: >
+      A natural person as asserted by one source record. Not deduplicated;
+      a Person node is a claim, not a confirmed human being.
+    properties:
+      name: { type: string, required: true, description: Name as supplied by the source }
+      name_script: { type: string, description: "Detected script: latin|devanagari|gujarati|tamil" }
+      name_latin: { type: string, description: Transliterated and normalized Latin form }
+      phonetic_key: { type: string, description: Indic-tuned phonetic skeleton }
+      source: { type: string, required: true }
+
+  Business:
+    label: Business
+    description: >
+      A commercial entity as asserted by one source record. Legal suffixes
+      (Pvt Ltd, & Sons, Enterprises) are stripped into `legal_suffix` rather
+      than discarded, because they are weak evidence of identity.
+    properties:
+      name: { type: string, required: true }
+      name_script: { type: string }
+      name_latin: { type: string }
+      legal_suffix: { type: string }
+      phonetic_key: { type: string }
+      source: { type: string, required: true }
+
+  Address:
+    label: Address
+    description: A postal address, parsed into Indian address components.
+    properties:
+      raw: { type: string, required: true }
+      house: { type: string, description: "House / flat / plot number" }
+      building: { type: string, description: "Society, apartment or building name" }
+      landmark: { type: string, description: "near/opp. landmark phrase" }
+      locality: { type: string }
+      city: { type: string }
+      state: { type: string }
+      pincode: { type: string, pattern: "^[1-9][0-9]{5}$" }
+
+  Phone:
+    label: Phone
+    description: An Indian phone number, normalized to its last 10 digits.
+    properties:
+      raw: { type: string, required: true }
+      e164: { type: string, description: "+91XXXXXXXXXX" }
+      last10: { type: string, pattern: "^[0-9]{10}$" }
+
+  Identifier:
+    label: Identifier
+    description: >
+      A government or platform identifier. ALWAYS masked — indic-er stores only
+      the last 4 characters plus a scheme label, never a full identifier.
+    properties:
+      scheme: { type: string, required: true, description: "pan|aadhaar|gstin|merchant" }
+      masked: { type: string, required: true, pattern: "^[X*]{3,}[A-Z0-9]{2,4}$" }
+
+  CanonicalEntity:
+    label: CanonicalEntity
+    description: >
+      The resolved entity: one real-world person or business, built by merging
+      a cluster of records. Carries merge provenance for every member.
+    properties:
+      entity_id: { type: string, required: true }
+      kind: { type: string, required: true, description: "person|business" }
+      canonical_name: { type: string, required: true }
+      member_ids: { type: json, required: true }
+      cluster_score: { type: float }
+      review_state: { type: string, description: "auto|human_confirmed|human_split" }
+
+relations:
+  same_as:
+    label: same_as
+    description: >
+      Two record nodes are believed to denote the same real-world entity.
+      Carries the pair score and the per-feature evidence that produced it.
+    domain: [Person, Business, Address, Phone]
+    range: [Person, Business, Address, Phone, CanonicalEntity]
+    symmetric: true
+    attributes:
+      score: { type: float, required: true }
+      evidence: { type: json, required: true, description: Per-feature contributions }
+      decision: { type: string, description: "merge|review|reject" }
+
+  located_at:
+    label: located_at
+    description: A person or business is located at an address.
+    domain: [Person, Business, CanonicalEntity]
+    range: [Address]
+    symmetric: false
+    attributes:
+      role: { type: string, description: "residence|registered|delivery" }
+
+  contact_of:
+    label: contact_of
+    description: A phone or identifier is a contact point for a person or business.
+    domain: [Phone, Identifier]
+    range: [Person, Business, CanonicalEntity]
+    symmetric: false
+    attributes:
+      verified: { type: bool }
+
+# Every fact written to the graph must carry these provenance fields.
+provenance:
+  required: [source, timestamp, confidence, method]
+  methods: [rule, model, human]
