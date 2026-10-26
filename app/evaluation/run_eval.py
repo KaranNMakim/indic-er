@@ -166,10 +166,44 @@ def rescore(pairs: list[PairScore], weights: WeightsConfig) -> list[PairScore]:
     return out
 
 
+def redecide(pairs: list[PairScore], weights: WeightsConfig) -> list[PairScore]:
+    """Re-band already-scored pairs under new thresholds.
+
+    A score does not depend on `auto_merge` or `review_low` — only the
+    decision does. The sweep changes nothing else, so rebuilding every
+    FeatureValue for 332,000 pairs at each of 23 points was pure waste: it
+    made `make eval` take minutes instead of seconds for no different answer.
+    Ablations still go through `rescore`, because those genuinely change the
+    weights and therefore the scores.
+    """
+    out: list[PairScore] = []
+    for pair in pairs:
+        gate = (
+            evidence_gate(pair.features, weights)
+            if pair.score >= weights.auto_merge
+            else None
+        )
+        out.append(
+            PairScore(
+                left_id=pair.left_id,
+                right_id=pair.right_id,
+                score=pair.score,
+                decision=decide(pair.score, weights, pair.features),
+                features=pair.features,
+                blocked_by=pair.blocked_by,
+                gate=gate,
+            )
+        )
+    return out
+
+
 def run_variant(
-    dataset: Dataset, weights: WeightsConfig, label: str
+    dataset: Dataset,
+    weights: WeightsConfig,
+    label: str,
+    pairs: list[PairScore] | None = None,
 ) -> tuple[ClusteringReport, dict[str, str], list[PairScore]]:
-    pairs = rescore(dataset.pairs, weights)
+    pairs = rescore(dataset.pairs, weights) if pairs is None else pairs
     outcome = cluster_records(dataset.normalized, pairs, weights)
     predicted = clusters_to_labels([entity.member_ids for entity in outcome.entities])
     merged = sum(1 for p in pairs if p.decision == "merge")
@@ -280,16 +314,21 @@ ABLATIONS = {
     "no_phone": {"feature_weights": {"phone": 0.0}},
     "no_evidence_gate": {"gate_enabled": False},
     "no_conflict_rules": {"conflicts_enabled": False},
+    "no_transitivity": {"transitivity_enabled": False},
 }
 
 
 def sweep(dataset: Dataset, weights: WeightsConfig) -> list[dict[str, Any]]:
+    # Scored once; each point only re-bands and re-clusters.
+    scored = rescore(dataset.pairs, weights)
     rows: list[dict[str, Any]] = []
     for threshold in SWEEP_POINTS:
         variant = weights.with_overrides(
             auto_merge=threshold, review_low=min(weights.review_low, threshold)
         )
-        report, _, _ = run_variant(dataset, variant, f"auto_merge={threshold}")
+        report, _, _ = run_variant(
+            dataset, variant, f"auto_merge={threshold}", redecide(scored, variant)
+        )
         rows.append(
             {
                 "auto_merge": threshold,

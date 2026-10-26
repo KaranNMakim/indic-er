@@ -406,3 +406,151 @@ def test_entity_to_dict_is_json_safe() -> None:
     payload = outcome.entities[0].to_dict()
     assert payload["size"] == 1
     assert payload["canonical_address"]["pincode"] == "380008"
+
+
+# --------------------------------------------------------------- transitivity #
+
+
+def test_a_rejected_pair_is_not_merged_in_through_a_chain() -> None:
+    """A pairwise score carries no transitivity guarantee.
+
+    A~B and B~C both clear the threshold, but A~C was compared directly and
+    rejected. Agglomeration alone puts all three in one cluster; the
+    transitivity check refuses the second merge instead.
+    """
+    weights = weights_config()
+    records = norm(
+        [
+            ("a", "Jayesh Patel", "12 Shreeji Soc, Maninagar, Ahmedabad 380008", "9825012345"),
+            ("b", "Jayesh Patel", "12 Shreeji Soc, Maninagar, Ahmedabad 380008", None),
+            ("c", "Jayesh Patel", "12 Shreeji Soc, Maninagar, Ahmedabad 380008", "9825012345"),
+        ]
+    )
+    pairs = [
+        pair("a", "b", 0.90),
+        pair("b", "c", 0.88),
+        pair("a", "c", 0.20, "reject"),
+    ]
+    outcome = cluster_records(records, pairs, weights)
+    members = {frozenset(e.member_ids) for e in outcome.entities}
+    assert frozenset({"a", "b"}) in members
+    assert frozenset({"c"}) in members
+    assert any(b["rule"] == "transitivity" for b in outcome.blocked_merges)
+    assert outcome.stats()["blocked_by_transitivity"] == 1
+
+
+def test_the_transitivity_reason_names_the_offending_pair() -> None:
+    weights = weights_config()
+    records = norm([(rid, "Jayesh Patel", None, None) for rid in ("a", "b", "c")])
+    pairs = [pair("a", "b", 0.90), pair("b", "c", 0.88), pair("a", "c", 0.20, "reject")]
+    outcome = cluster_records(records, pairs, weights)
+    blocked = next(b for b in outcome.blocked_merges if b["rule"] == "transitivity")
+    assert "a" in blocked["reason"] and "c" in blocked["reason"]
+    assert "veto floor" in blocked["reason"]
+
+
+def test_an_unscored_pair_never_vetoes_a_merge() -> None:
+    """Absence is not disagreement.
+
+    Blocking recall is 99.6%, not 100%. If a pair that blocking simply never
+    proposed could veto a merge, the blocking ceiling would silently become a
+    precision ceiling too, and large true clusters would be torn apart.
+    """
+    weights = weights_config()
+    records = norm([(rid, "Jayesh Patel", None, None) for rid in ("a", "b", "c")])
+    pairs = [pair("a", "b", 0.90), pair("b", "c", 0.88)]  # a~c never scored
+    outcome = cluster_records(records, pairs, weights)
+    assert len(outcome.entities) == 1
+    assert outcome.entities[0].size == 3
+
+
+def test_a_review_band_pair_does_not_veto_a_merge() -> None:
+    """Only pairs below the review floor object. `review` means "ask a human"."""
+    weights = weights_config()
+    records = norm([(rid, "Jayesh Patel", None, None) for rid in ("a", "b", "c")])
+    pairs = [pair("a", "b", 0.90), pair("b", "c", 0.88), pair("a", "c", 0.75, "review")]
+    outcome = cluster_records(records, pairs, weights)
+    assert len(outcome.entities) == 1
+
+
+def test_a_reviewer_accept_overrides_the_transitivity_veto() -> None:
+    """A human decision is never vetoed by a machine score.
+
+    Human-confirmed edges are applied before any other, so they anchor
+    clusters rather than being refused by them. Here the second accepted edge
+    would bring together a and c, which the model rejected at 0.20 — and it
+    merges anyway, because a reviewer looked at both pairs and said yes.
+    """
+    weights = weights_config()
+    records = norm([(rid, "Jayesh Patel", None, None) for rid in ("a", "b", "c")])
+    pairs = [pair("a", "b", 0.90), pair("b", "c", 0.60, "review"), pair("a", "c", 0.20, "reject")]
+    outcome = cluster_records(
+        records, pairs, weights, overrides={"a::b": "accept", "b::c": "accept"}
+    )
+    assert len(outcome.entities) == 1
+    assert outcome.entities[0].size == 3
+    assert outcome.entities[0].review_state == "human_confirmed"
+
+
+def test_a_very_strong_pair_overrides_the_transitivity_veto() -> None:
+    """The escape hatch, and it is recorded rather than silent.
+
+    a~b at 0.995 lands first. b~c at 0.96 would then bring a and c together,
+    and a~c was rejected at 0.20 — but 0.96 clears the transitivity override
+    threshold, so the merge proceeds and the contradiction is reported.
+    """
+    weights = weights_config()
+    records = norm([(rid, "Jayesh Patel", None, None) for rid in ("a", "b", "c")])
+    pairs = [pair("a", "b", 0.995), pair("b", "c", 0.96), pair("a", "c", 0.20, "reject")]
+    outcome = cluster_records(records, pairs, weights)
+    assert len(outcome.entities) == 1
+    conflict = next(c for c in outcome.unresolved_conflicts if c["rule"] == "transitivity")
+    assert "override threshold" in conflict["reason"]
+
+
+def test_transitivity_can_be_turned_off() -> None:
+    weights = weights_config().with_overrides(transitivity_enabled=False)
+    records = norm([(rid, "Jayesh Patel", None, None) for rid in ("a", "b", "c")])
+    pairs = [pair("a", "b", 0.90), pair("b", "c", 0.88), pair("a", "c", 0.20, "reject")]
+    outcome = cluster_records(records, pairs, weights)
+    assert len(outcome.entities) == 1
+
+
+def test_the_pair_check_cap_skips_rather_than_going_quadratic() -> None:
+    weights = weights_config().with_overrides()
+    object.__setattr__(weights, "transitivity_max_pair_checks", 1)
+    records = norm([(f"r{i}", "Jayesh Patel", None, None) for i in range(4)])
+    pairs = [
+        pair("r0", "r1", 0.95),
+        pair("r2", "r3", 0.94),
+        pair("r1", "r2", 0.90),
+        pair("r0", "r3", 0.10, "reject"),
+    ]
+    outcome = cluster_records(records, pairs, weights)
+    assert outcome.transitivity_checks_skipped >= 1
+    assert "transitivity_checks_skipped" in outcome.stats()
+
+
+def test_rejection_index_is_symmetric_and_only_holds_rejections() -> None:
+    from app.core.cluster import build_rejection_index
+
+    weights = weights_config()
+    index = build_rejection_index(
+        [pair("a", "b", 0.2, "reject"), pair("c", "d", 0.9), pair("e", "f", 0.75, "review")],
+        weights,
+    )
+    assert index["a"]["b"] == pytest.approx(0.2)
+    assert index["b"]["a"] == pytest.approx(0.2)
+    assert "c" not in index
+    assert "e" not in index
+
+
+def test_transitivity_clash_returns_a_deterministic_pair() -> None:
+    from app.core.cluster import transitivity_clash
+
+    weights = weights_config()
+    rejected = {"a": {"y": 0.2, "z": 0.1}, "y": {"a": 0.2}, "z": {"a": 0.1}}
+    first = transitivity_clash({"a"}, {"y", "z"}, rejected, weights)
+    second = transitivity_clash({"a"}, {"z", "y"}, rejected, weights)
+    assert first == second
+    assert transitivity_clash({"a"}, {"q"}, rejected, weights) is None

@@ -3,6 +3,55 @@
 All notable changes to indic-er. Phases follow the build order in
 [PLAN.md](PLAN.md).
 
+## Transitivity check
+
+A pairwise score carries no transitivity guarantee: A~B and B~C can both clear
+the merge threshold while A~C was compared directly and **rejected**.
+Agglomeration alone still put all three in one cluster, and in the evaluation
+that was the entire residual false-positive class — every sampled
+false-positive *pair* was decided `review` or `reject`, yet the records shared
+an entity through a chain of other edges.
+
+A merge is now refused when the cluster it would create would contain a member
+pair that was scored and fell below `review_low`. Configurable under
+`transitivity` in `config/weights.yaml`, with the same override semantics as
+the other conflict rules (a reviewer's accept always wins; a pair at or above
+0.95 merges anyway and is recorded as an unresolved conflict).
+
+**The veto fires only on pairs that were actually scored.** A pair blocking
+never proposed is unknown, not disagreement — letting absence veto a merge
+would turn blocking's 99.6% recall ceiling into a precision ceiling too, and
+would tear apart large true clusters where not every internal pair happens to
+be a candidate.
+
+| | precision | recall | pairwise F1 | B³ F1 | false-positive pairs |
+|---|---|---|---|---|---|
+| before | 0.688 | 0.941 | 0.795 | 0.921 | ~4,000 |
+| **after** | **0.981** | 0.933 | **0.957** | **0.972** | **168** |
+
+The veto floor is its own setting (`transitivity.veto_below`), not
+`review_low`. They started as one knob, and widening the review band from 0.70
+to 0.62 silently weakened the veto — F1 fell from 0.957 to 0.944. "Which pairs
+does a human look at" and "which pairs are confident enough to block a merge"
+are different questions and now have different numbers.
+
+With precision no longer carried by the threshold, the sweep optimum moved from
+0.84 to a flat 0.68–0.78 plateau; `auto_merge` is now **0.74**, which recovers
+1.4 points of recall for one thousandth of precision.
+
+Two further findings, reported because they are what the measurement says:
+
+- **The field-based conflict rules now earn almost nothing** (ΔF1 −0.003). The
+  transitivity check subsumes most of what they caught. Retained because they
+  fire on pairs that were never scored, which transitivity by design cannot
+  see.
+- **Removing the phonetic scoring feature slightly improves F1** (0.961 vs
+  0.957). Kept at a non-zero weight because the margin is within noise and the
+  signal holds recall up on sparser data — but its indispensable job is
+  blocking, where removing it costs 18 points of recall ceiling.
+
+374 tests, 97% coverage on `app/core`.
+
 ## Phase 5 — Data, evaluation and docs
 
 - **Synthetic data generator** (`data/generate.py`, pools in `data/pools.yaml`):
@@ -31,6 +80,7 @@ All notable changes to indic-er. Phases follow the build order in
 | baseline (exact + fuzzy) | 0.074 | 0.324 | 0.040 | 0.452 |
 
 Blocking recall 0.9956. 364 tests, 97% coverage on `app/core`.
+(Superseded by the transitivity check above: F1 0.922 → 0.950.)
 
 ## Phase 4 — Web app
 

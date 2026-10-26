@@ -44,13 +44,14 @@ truth. Reproduce with `make eval`; full detail in
 
 | | pairwise P | R | F1 | B³ F1 | entities | largest cluster |
 |---|---|---|---|---|---|---|
-| **indic-er** | **0.923** | **0.922** | **0.922** | **0.957** | 1,458 | 19 |
+| **indic-er** | **0.981** | **0.933** | **0.957** | **0.972** | 1,444 | 15 |
 | baseline — exact only | 0.220 | 0.112 | 0.148 | 0.472 | 3,158 | 14 |
 | baseline — exact + fuzzy | 0.040 | 0.452 | 0.074 | 0.324 | 678 | 170 |
 | ground truth | 1.000 | 1.000 | 1.000 | 1.000 | 1,302 | 8 |
 
-**12.4× the fuzzy baseline on pairwise F1.** Blocking recall is 0.9956, so
-only 41 of 9,424 true pairs are unreachable before scoring even starts.
+**12.9× the fuzzy baseline on pairwise F1**, with 168 false-positive pairs
+against the baseline's 101,138. Blocking recall is 0.9956, so only 41 of 9,424
+true pairs are unreachable before scoring even starts.
 
 The baseline is a real implementation, not a strawman: exact match then
 Jaro-Winkler on raw name strings, blocked on the first two characters. It
@@ -59,30 +60,41 @@ honorific, a change of script, or Patel/Patil.
 
 ### What each component is worth
 
-| removed | F1 | ΔF1 |
-|---|---|---|
-| nothing (full pipeline) | 0.922 | — |
-| evidence gate | 0.587 | −0.335 |
-| address evidence | 0.617 | −0.305 |
-| conflict rules | 0.838 | −0.085 |
-| phone | 0.881 | −0.042 |
-| phonetics (scoring only) | 0.916 | −0.006 |
-| name rarity | 0.922 | 0.000 |
+| removed | P | R | F1 | ΔF1 |
+|---|---|---|---|---|
+| nothing (full pipeline) | 0.981 | 0.933 | 0.957 | — |
+| evidence gate | 0.461 | 0.895 | 0.608 | −0.349 |
+| address evidence | 0.508 | 0.852 | 0.636 | −0.321 |
+| transitivity check | 0.688 | 0.941 | 0.795 | −0.162 |
+| phone | 0.964 | 0.928 | 0.946 | −0.011 |
+| conflict rules | 0.976 | 0.933 | 0.954 | −0.003 |
+| name rarity | 0.984 | 0.930 | 0.956 | −0.001 |
+| phonetics (scoring only) | 0.996 | 0.929 | **0.961** | **+0.004** |
 
-Two of those rows need saying out loud:
+Four of those rows need saying out loud:
 
-- **Phonetics look almost worthless and are not.** After transliteration and
-  honorific stripping, `name_string` already handles most spelling variants, so
-  the phonetic *feature* is largely redundant with it. The phonetic *key* is
-  what makes a true pair a candidate at all — remove it from blocking and
-  recall falls from **0.996 to 0.814**, putting 1,758 true pairs beyond the
-  reach of any threshold. Judging it on the scoring ablation alone would be
-  the wrong conclusion from the right number.
-- **`name_rarity` currently earns nothing** (ΔF1 0.000; it trades 0.6 points of
-  precision for 0.6 of recall). Once `house_number` and the evidence gate
-  existed, it became redundant. It is kept because it is the right feature for
-  a dataset with weaker address coverage, and it is reported at zero rather
-  than quietly dropped.
+- **The evidence gate and address evidence carry the system.** Remove either
+  and precision roughly halves. Everything else is refinement.
+- **The transitivity check is what makes precision usable.** A pairwise score
+  guarantees nothing about transitivity: A~B and B~C can both pass while A~C
+  was compared directly and rejected. Refusing that merge takes precision from
+  0.688 to 0.981 — false-positive pairs fall from roughly 4,000 to 168 — for
+  under a point of recall.
+- **Removing the phonetic scoring feature slightly *improves* F1** (0.961 vs
+  0.957; it trades 1.5 points of precision for 0.4 of recall). That is the
+  measurement, so it is what the table says. It is kept at a non-zero weight
+  because the margin is within noise and the phonetic signal is what holds
+  recall up on datasets with sparser address coverage — but on this benchmark
+  its scoring contribution is not positive, and pretending otherwise would be
+  dishonest. **Its indispensable job is blocking:** remove it there and recall
+  falls from **0.996 to 0.814**, putting 1,758 true pairs beyond the reach of
+  any threshold. Judging the phonetic key on the scoring ablation alone would
+  be the wrong conclusion from the right number.
+- **The field-based conflict rules now earn almost nothing** (−0.003). The
+  transitivity check subsumes most of what they caught. They are retained
+  because they fire on pairs that were never scored, which transitivity by
+  design cannot see — but their measured contribution is near zero and is
+  reported as such rather than quietly dropped.
 
 ## Architecture
 
@@ -154,9 +166,16 @@ the gate off, connected components chained 4,702 records into one "entity".
 
 **Clustering checks conflicts before merging, not after.** Merge edges are
 applied strongest-first and an edge is refused if the cluster it would create
-trips a rule from `config/weights.yaml` (two different pincodes *and* two
-different phones, say). Checking before the union means a bad merge never
-happens and nothing has to be unpicked.
+would either trip a rule from `config/weights.yaml` (two different pincodes
+*and* two different phones, say) or **contain a pair that was scored and
+rejected**. Checking before the union means a bad merge never happens and
+nothing has to be unpicked.
+
+That second test — the transitivity check — only ever fires on pairs that were
+actually scored. A pair blocking never proposed is *unknown*, not disagreement;
+treating absence as a veto would turn blocking's 99.6% recall ceiling into a
+precision ceiling as well, and would tear apart large true clusters where not
+every internal pair happens to be a candidate.
 
 **Every graph fact carries provenance** — source, timestamp, confidence and
 method (`rule` / `model` / `human`). The ontology refuses the write otherwise.
@@ -325,7 +344,7 @@ exercise above is step one commercially as well as technically.
 py tasks.py test
 ```
 
-364 tests. Coverage on `app/core` is **97%** against an enforced floor of 80%.
+374 tests. Coverage on `app/core` is **97%** against an enforced floor of 80%.
 Includes API contract tests, a web smoke test, and a test asserting that the
 matching core never imports the LLM layer.
 

@@ -60,6 +60,7 @@ class ClusterOutcome:
     entities: list[CanonicalEntity] = field(default_factory=list)
     blocked_merges: list[dict[str, Any]] = field(default_factory=list)
     unresolved_conflicts: list[dict[str, Any]] = field(default_factory=list)
+    transitivity_checks_skipped: int = 0
 
     def stats(self) -> dict[str, Any]:
         sizes = [e.size for e in self.entities]
@@ -71,7 +72,11 @@ class ClusterOutcome:
             "largest_entity": max(sizes, default=0),
             "mean_merged_size": round(sum(multi) / len(multi), 2) if multi else 0.0,
             "blocked_merges": len(self.blocked_merges),
+            "blocked_by_transitivity": sum(
+                1 for b in self.blocked_merges if b["rule"] == "transitivity"
+            ),
             "unresolved_conflicts": len(self.unresolved_conflicts),
+            "transitivity_checks_skipped": self.transitivity_checks_skipped,
         }
 
 
@@ -191,6 +196,88 @@ def find_conflicts(
     return found
 
 
+def build_rejection_index(
+    pairs: list[PairScore], weights: WeightsConfig
+) -> dict[str, dict[str, float]]:
+    """``{record: {other_record: score}}`` for every pair below the veto floor.
+
+    Only pairs that were *actually scored* appear here. A pair blocking never
+    proposed is absent, and absence must not be read as disagreement: blocking
+    recall is 99.6%, not 100%, and letting a missing candidate veto a merge
+    would turn the blocking ceiling into a precision ceiling as well.
+
+    The floor is `transitivity.veto_below`, not `review_low`. Tying the two
+    together meant that widening the review band quietly weakened the veto.
+
+    A human rejection is included whatever it scored — that is the strongest
+    possible evidence that two records are not the same entity.
+    """
+    index: dict[str, dict[str, float]] = {}
+    for pair in pairs:
+        rejected = (
+            pair.override == HUMAN_REJECT
+            or pair.score < weights.transitivity_veto_below
+        )
+        if not rejected:
+            continue
+        index.setdefault(pair.left_id, {})[pair.right_id] = pair.score
+        index.setdefault(pair.right_id, {})[pair.left_id] = pair.score
+    return index
+
+
+def transitivity_clash(
+    left_members: set[str],
+    right_members: set[str],
+    rejected_with: dict[str, dict[str, float]],
+    weights: WeightsConfig,
+    outcome: ClusterOutcome | None = None,
+) -> tuple[str, str, float] | None:
+    """The scored-and-rejected pair this merge would bring together, if any.
+
+    A pairwise score carries no transitivity guarantee: A~B and B~C can both
+    clear the threshold while A~C was compared directly and rejected.
+    Agglomeration on its own will still put all three in one cluster, and in
+    the evaluation that was the whole residual false-positive class — every
+    sampled false-positive *pair* was decided `review` or `reject`, yet the
+    records ended up sharing an entity through a chain of other edges.
+
+    Iterates the smaller cluster and intersects each member's rejection set
+    with the larger cluster, so the cost is bounded by the rejections actually
+    recorded rather than by the product of the cluster sizes.
+    """
+    if not weights.transitivity_enabled or not rejected_with:
+        return None
+
+    small, large = (
+        (left_members, right_members)
+        if len(left_members) <= len(right_members)
+        else (right_members, left_members)
+    )
+    if len(small) * len(large) > weights.transitivity_max_pair_checks:
+        log.warning(
+            "transitivity_check_skipped",
+            extra={
+                "left": len(left_members),
+                "right": len(right_members),
+                "limit": weights.transitivity_max_pair_checks,
+            },
+        )
+        if outcome is not None:
+            outcome.transitivity_checks_skipped += 1
+        return None
+
+    for member in sorted(small):
+        rejections = rejected_with.get(member)
+        if not rejections:
+            continue
+        clashing = rejections.keys() & large
+        if clashing:
+            other = min(clashing)
+            left_id, right_id = sorted((member, other))
+            return (left_id, right_id, rejections[other])
+    return None
+
+
 def merge_conflict(
     left: ClusterSummary,
     right: ClusterSummary,
@@ -292,6 +379,10 @@ def cluster_records(
     summaries: dict[str, ClusterSummary] = {
         record_id: ClusterSummary.for_record(record) for record_id, record in records.items()
     }
+    # Cluster membership, kept alongside union-find so the transitivity check
+    # can ask "who is already in there?" without walking every record.
+    members: dict[str, set[str]] = {record_id: {record_id} for record_id in records}
+    rejected_with = build_rejection_index(pairs, weights)
 
     # Human-confirmed edges first, then by descending score, then by pair id
     # so the result never depends on dict ordering.
@@ -313,9 +404,57 @@ def cluster_records(
             _add_edge(graph, pair)
             continue
 
+        forced = pair.override == HUMAN_ACCEPT
+
+        # Transitivity: would this merge put a scored-and-rejected pair into
+        # one cluster? Checked first, because it is the stronger objection —
+        # the two records in question were compared directly and the answer
+        # was no, where a conflict rule only infers a clash from field values.
+        clash = (
+            None
+            if forced
+            else transitivity_clash(
+                members[root_left], members[root_right], rejected_with, weights, outcome
+            )
+        )
+        if clash is not None:
+            left_clash, right_clash, clash_score = clash
+            if pair.score < weights.transitivity_override_score:
+                outcome.blocked_merges.append(
+                    {
+                        "rule": "transitivity",
+                        "pair_id": pair.pair_id,
+                        "left_id": pair.left_id,
+                        "right_id": pair.right_id,
+                        "score": round(pair.score, 4),
+                        "reason": (
+                            f"transitivity: merging on {pair.left_id} ~ {pair.right_id} "
+                            f"({pair.score:.2f}) would put {left_clash} and "
+                            f"{right_clash} in one entity, and that pair was scored "
+                            f"at {clash_score:.2f} — below the veto floor of "
+                            f"{weights.transitivity_veto_below:.2f}"
+                        ),
+                    }
+                )
+                continue
+            outcome.unresolved_conflicts.append(
+                {
+                    "rule": "transitivity",
+                    "pair_id": pair.pair_id,
+                    "left_id": pair.left_id,
+                    "right_id": pair.right_id,
+                    "score": round(pair.score, 4),
+                    "reason": (
+                        f"merged despite {left_clash} ~ {right_clash} scoring "
+                        f"{clash_score:.2f}: the merging pair scores {pair.score:.2f}, "
+                        f"at or above the transitivity override threshold "
+                        f"{weights.transitivity_override_score:.2f}"
+                    ),
+                }
+            )
+
         rule = merge_conflict(summaries[root_left], summaries[root_right], pair, weights)
         if rule is not None:
-            forced = pair.override == HUMAN_ACCEPT
             strong = pair.score >= weights.conflict_override_score
             if not forced and not strong:
                 outcome.blocked_merges.append(
@@ -356,6 +495,10 @@ def cluster_records(
         new_root = union.union(root_left, root_right)
         merged = summaries[root_left].merged_with(summaries[root_right])
         summaries[new_root] = merged
+        members[new_root] = members[root_left] | members[root_right]
+        for stale in (root_left, root_right):
+            if stale != new_root:
+                del members[stale]
         _add_edge(graph, pair)
 
     pairs_by_id = {pair.pair_id: pair for pair in pairs}

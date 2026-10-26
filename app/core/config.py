@@ -192,6 +192,10 @@ class WeightsConfig:
     conflict_rules: tuple[ConflictRule, ...]
     conflict_override_score: float
     address_weak_below: float
+    transitivity_enabled: bool
+    transitivity_max_pair_checks: int
+    transitivity_override_score: float
+    transitivity_veto_below: float
     baseline_fuzzy_threshold: float
     baseline_description: str
     canonical_name_strategy: str
@@ -237,6 +241,7 @@ class WeightsConfig:
             )
             for r in conflicts.get("rules", [])
         )
+        transitivity = raw.get("transitivity") or {}
         baseline = raw.get("baseline") or {}
         canonical = raw.get("canonical") or {}
         review = raw.get("review") or {}
@@ -258,6 +263,10 @@ class WeightsConfig:
             conflict_rules=rules,
             conflict_override_score=float(conflicts.get("override_score", 0.92)),
             address_weak_below=float(conflicts.get("address_weak_below", 0.45)),
+            transitivity_enabled=bool(transitivity.get("enabled", True)),
+            transitivity_max_pair_checks=int(transitivity.get("max_pair_checks", 20_000)),
+            transitivity_override_score=float(transitivity.get("override_score", 0.95)),
+            transitivity_veto_below=float(transitivity.get("veto_below", review_low)),
             baseline_fuzzy_threshold=float(baseline.get("fuzzy_threshold", 0.88)),
             baseline_description=str(baseline.get("description", "")).strip(),
             canonical_name_strategy=str(canonical.get("name_strategy", "most_complete")),
@@ -274,6 +283,7 @@ class WeightsConfig:
         review_low: float | None = None,
         conflicts_enabled: bool | None = None,
         gate_enabled: bool | None = None,
+        transitivity_enabled: bool | None = None,
     ) -> WeightsConfig:
         """Return a copy with selected values replaced (used by ablations)."""
         features = dict(self.features)
@@ -306,6 +316,12 @@ class WeightsConfig:
             conflict_rules=self.conflict_rules,
             conflict_override_score=self.conflict_override_score,
             address_weak_below=self.address_weak_below,
+            transitivity_enabled=(
+                self.transitivity_enabled if transitivity_enabled is None else transitivity_enabled
+            ),
+            transitivity_max_pair_checks=self.transitivity_max_pair_checks,
+            transitivity_override_score=self.transitivity_override_score,
+            transitivity_veto_below=self.transitivity_veto_below,
             baseline_fuzzy_threshold=self.baseline_fuzzy_threshold,
             baseline_description=self.baseline_description,
             canonical_name_strategy=self.canonical_name_strategy,

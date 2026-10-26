@@ -318,6 +318,10 @@ What this says, in order of how much it matters:
   the address, the phone and the phonetics combined.
 - **Address evidence is what separates two people with the same name.** This is
   the half of the problem that name matching cannot touch at all.
+- **The transitivity check is what makes precision usable.** A pairwise score
+  guarantees nothing about transitivity: A~B and B~C can both pass while A~C
+  was compared directly and rejected. Refusing that merge cut false-positive
+  pairs by roughly four fifths for well under half a point of recall.
 - **Conflict rules stop the residual over-merging** that agglomeration alone
   would leave.
 - **Phonetics barely move scoring, and that is not a verdict on them.** After
@@ -334,19 +338,27 @@ What this says, in order of how much it matters:
 
 ### False positives — records merged that are different entities
 
-Every sampled false-positive **pair** carries the decision `review`, not
-`merge`. The pair itself was not merged: the two records were pulled into one
-cluster through a *chain* of other merge edges. That is the residual weakness
-of any agglomerative approach, and it concentrates on records with no address
-at all, where the only evidence available is the name.
+A sampled false-positive **pair** usually carries the decision `review` or
+`reject`, not `merge`. The pair itself was not merged: the two records were
+pulled into one cluster through a *chain* of other merge edges. That is the
+characteristic weakness of any agglomerative approach, and it concentrates on
+records with no address at all, where the only evidence available is the name.
 
-The generator contributes to this honestly: 2.4% of records get one wrong digit
-in the phone number, which occasionally collides with another entity's number
-and forms exactly such a bridge. That is a real data hazard, not an artefact.
+The **transitivity check** addresses exactly this: a merge is refused when the
+cluster it would create would contain a member pair that was scored and fell
+below the review floor. The ablation in section 5 measures it. It fires only
+on pairs that were actually scored — a pair blocking never proposed is unknown,
+not disagreement, and letting absence veto a merge would turn blocking's recall
+ceiling into a precision ceiling too.
 
-**What would fix it:** a transitivity check at cluster level, refusing a merge
-when the resulting cluster would contain a member pair that scores below the
-review floor. It is not in this POV."""
+What remains after it are chains that run through pairs nobody scored. The
+generator contributes to these honestly: 2.4% of records get one wrong digit in
+the phone number, which occasionally collides with another entity's number and
+forms exactly such a bridge. That is a real data hazard, not an artefact.
+
+**What would reduce it further:** blocking that proposes more of the
+within-cluster pairs, so fewer links are unexamined — a character n-gram key
+would do it, at the cost of a much larger candidate set."""
     ]
     if diagnosis.get("false_positives"):
         failure_lines.append("\nSampled false positives:\n")

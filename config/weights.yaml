@@ -67,27 +67,34 @@ features:
 # human reviewer earns their keep.
 #
 # These values are not guesses — they come from the threshold sweep in
-# `make eval`, which is reproduced in docs/eval-report.md:
+# `make eval`, reproduced in docs/eval-report.md:
 #
 #   auto_merge   pairwise P    R        F1       B-cubed F1   entities
-#   0.72         0.525         0.941    0.674    0.877        1208
-#   0.78         0.810         0.939    0.870    0.942        1363
-#   0.82         0.877         0.935    0.905    0.954        1406
-#   0.84         0.914         0.917    0.916    0.954        1467   <- chosen
-#   0.86         0.938         0.896    0.916    0.951        1526
-#   0.90         0.961         0.819    0.884    0.924        1723
+#   0.62         0.940         0.938    0.939    0.964        1399
+#   0.68         0.979         0.936    0.957    0.973        1436
+#   0.74         0.981         0.933    0.957    0.972        1444   <- chosen
+#   0.78         0.981         0.933    0.957    0.972        1446
+#   0.82         0.982         0.931    0.956    0.972        1455
+#   0.84         0.982         0.919    0.950    0.966        1489
+#   0.90         0.981         0.838    0.904    0.935        1676
 #
-# 0.84 is the joint optimum: the highest pairwise F1, tied-highest B-cubed F1,
-# and precision and recall within 0.003 of each other. 0.86 buys 2.4 points of
-# precision for 2.1 points of recall, which is the trade a KYC-shaped customer
-# might well prefer — it is one line in this file.
+# The shape of this curve changed completely once the transitivity check
+# existed. Before it, precision climbed steadily with the threshold and 0.84
+# was the joint optimum; the threshold was the only thing holding false
+# merges back. Now the transitivity check does that work, precision is flat
+# at ~0.98 everywhere from 0.68 up, and raising the threshold buys nothing
+# but lost recall. 0.84 cost 2.4 points of recall for one thousandth of
+# precision.
 #
-# review_low sits at 0.70 rather than lower on purpose. The band is where
-# human time is spent, so it has to be worth spending: below 0.70 the pairs
-# are overwhelmingly genuine non-matches and the queue becomes unworkable.
+# 0.74 sits in the middle of a flat plateau (0.68-0.78 are within 0.001 of
+# each other on F1), so the choice is robust rather than perched on a peak.
+#
+# review_low drops to 0.62 to keep the review band meaningful: between 0.62
+# and 0.74 precision falls from 0.981 to 0.940, which is exactly the region
+# where a human's judgement is worth more than a threshold.
 thresholds:
-  auto_merge: 0.84
-  review_low: 0.70
+  auto_merge: 0.74
+  review_low: 0.62
 
 # --------------------------------------------------------------------------- #
 # Evidence gate
@@ -171,6 +178,45 @@ conflicts:
   # A pair must score at least this well to survive a tripped conflict rule.
   override_score: 0.92
   address_weak_below: 0.45
+
+# --------------------------------------------------------------------------- #
+# Transitivity
+# --------------------------------------------------------------------------- #
+# A pairwise score says nothing about transitivity: A~B and B~C can both pass
+# while A~C was looked at and rejected. Agglomeration alone will still put all
+# three in one cluster, and that was the entire residual false-positive class
+# in the evaluation — every sampled false-positive *pair* carried the decision
+# `review` or `reject`, yet the records shared a cluster through a chain of
+# other edges.
+#
+# So a merge is refused when the cluster it would create would contain a
+# member pair that was scored and fell below `review_low`.
+#
+# The veto fires ONLY on pairs that were actually scored. A pair blocking never
+# proposed is unknown, not disagreement — treating absence as a veto would make
+# blocking's recall ceiling silently cap precision too, and would punish large
+# true clusters where not every internal pair happens to be a candidate.
+transitivity:
+  enabled: true
+  # Cross-cluster pair checks are capped so a pathological merge cannot
+  # dominate the run. Above this the check is skipped and logged rather than
+  # allowed to go quadratic; clusters are small in practice (largest 19).
+  max_pair_checks: 20000
+  # A pair scoring at least this much merges anyway, recorded as an unresolved
+  # conflict — the same escape hatch the other conflict rules use.
+  override_score: 0.95
+  # A scored pair below this vetoes a merge that would unite its two records.
+  #
+  # Deliberately its own number rather than `review_low`. They were the same
+  # knob at first, and moving the review band from 0.70 to 0.62 silently
+  # weakened the veto — pairs scoring 0.62-0.70 stopped objecting, precision
+  # fell from 0.982 to 0.951 and F1 with it. Two unrelated jobs ("which pairs
+  # does a human look at" and "which pairs are confident enough to block a
+  # merge") should not share a setting.
+  #
+  # Swept like everything else: 0.62 gives F1 0.944, 0.70 gives 0.957,
+  # 0.74 gives 0.957. 0.70 is the knee.
+  veto_below: 0.70
 
 # --------------------------------------------------------------------------- #
 # Baseline (for the comparison the stakeholder actually cares about)

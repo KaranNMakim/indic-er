@@ -27,9 +27,9 @@ Fourteen hand-built records go in. They look like five different problems:
 | `Kokilaben Shah` / `કોકિલા શાહ` / `Smt. Kokila Sah` | one person; `ben` is a suffix, `Sah` and `Shah` are the same sound |
 | `Patel Trading Pvt. Ltd.` / `M/s Patel Trading & Sons` | one business under two legal wrappers |
 | `Laxmi Subramaniam` / `லக்ஷ்மி சுப்ரமணியன்` | one person, Tamil and Latin |
-| `Jayesh Patel` in Bopal, `J. Patil`, `Jayesh Patel` with no address | **three traps** |
+| `Jayesh Patel` in Bopal, `Jayesh Patel` with no address | **two traps** |
 
-**Point at the summary strip.** 14 records in, 8 entities out, 43% duplicate
+**Point at the summary strip.** 14 records in, 7 entities out, 50% duplicate
 rate, about 5 ms.
 
 **Then point at what did *not* happen** — this is the part that matters:
@@ -42,10 +42,11 @@ rate, about 5 ms.
   it sits in the review queue. Expand it and read the near-miss: the pair
   scores 1.00 on the name and is held anyway, because
   *"only 42% of the evidence could be computed."* That is the evidence gate.
-- `J. Patil` scores **0.835** — just under the threshold. Also held for review.
-  Flow 2 picks this up.
+- `J. Patil` — an initial instead of a given name, a variant surname, no phone
+  and no house number — **does** merge, at 0.835. That is the variant handling
+  earning its keep.
 
-**Expand `Jayesh Patel` (3 records).** Each member shows its normalization
+**Expand `Jayesh Patel` (4 records).** Each member shows its normalization
 trace: `gujarati → jayesh patel`, `~~bhai~~`, `key JS-PTL`. Nothing is
 silently discarded; an auditor can see why every token disappeared.
 
@@ -102,10 +103,11 @@ Top strip, measured on 5,000 synthetic records with ground truth:
 
 | | pairwise F1 | B³ F1 | precision | recall |
 |---|---|---|---|---|
-| **indic-er** | **0.922** | **0.957** | 0.923 | 0.922 |
+| **indic-er** | **0.957** | **0.972** | 0.981 | 0.933 |
 | baseline (exact + fuzzy) | 0.074 | 0.324 | 0.040 | 0.452 |
 
-**12.4× the baseline on pairwise F1.** The baseline is a real implementation,
+**12.9× the baseline on pairwise F1** — 168 false-positive pairs against the
+baseline's 101,138. The baseline is a real implementation,
 not a strawman — exact match plus Jaro-Winkler on raw strings, blocked on two
 characters. It catches a trailing suffix and a plain typo. It cannot see
 through a leading honorific, a script change, or Patel/Patil.
@@ -115,13 +117,15 @@ Scroll down for the three things a sceptical buyer asks next:
 - **Threshold sweep.** The curve is flat above 0.84, so the shipped default is
   not balanced on a knife edge. Want more precision? One line of config.
 - **Ablations — what each piece is worth.** The evidence gate is the single
-  biggest contributor (−0.335 F1 without it). Address evidence is next
-  (−0.305). Phonetics move scoring by only −0.006 …
+  biggest contributor (−0.349 F1 without it). Address evidence is next
+  (−0.321), then the transitivity check (−0.162). Phonetics move scoring by
+  **+0.004** — removing the feature very slightly *helps* …
 - **… which the blocking table explains.** Remove phonetic blocking and recall
   falls from **0.996 to 0.814**: 1,758 true pairs never become candidates and
   no threshold can recover them. The phonetic key's job is reach, not scoring.
   Reporting the ablation without this table would be misleading, so both are
-  shown.
+  shown — including the inconvenient fact that the scoring feature is a hair
+  net-negative on this dataset.
 - **Recall by failure mode**, worst first. `name_only` records are the weak
   slice by design — and the honest answer is that they need a human or another
   field, which is what Flow 2 is for.
@@ -150,4 +154,4 @@ make demo
 ```
 
 Load example → Resolve → look at the two `Jayesh Patel` entities that did
-**not** merge → Metrics tab → 0.922 against the baseline's 0.074.
+**not** merge → Metrics tab → 0.957 against the baseline's 0.074.
