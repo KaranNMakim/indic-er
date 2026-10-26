@@ -554,3 +554,50 @@ def test_transitivity_clash_returns_a_deterministic_pair() -> None:
     second = transitivity_clash({"a"}, {"z", "y"}, rejected, weights)
     assert first == second
     assert transitivity_clash({"a"}, {"q"}, rejected, weights) is None
+
+
+def test_a_merge_edge_never_vetoes_its_own_merge() -> None:
+    """A pair cannot be both the reason to merge and the reason not to.
+
+    `veto_below` and `auto_merge` are independent settings, so a threshold
+    under the veto floor used to put merge edges into the rejection index,
+    where each one blocked itself. Every sweep point at or below the floor
+    then produced identical numbers.
+    """
+    weights = weights_config().with_overrides(auto_merge=0.50, review_low=0.50)
+    records = norm(
+        [
+            ("a", "Jayesh Patel", "12 Shreeji Soc, Maninagar, Ahmedabad 380008", "9825012345"),
+            ("b", "Jayesh Patil", "12 Shreeji Soc, Maninagar, Ahmedabad 380008", "9825012345"),
+        ]
+    )
+    # 0.55 is a merge at this threshold but sits under the 0.70 veto floor.
+    outcome = cluster_records(records, [pair("a", "b", 0.55)], weights)
+    assert len(outcome.entities) == 1
+    assert not outcome.blocked_merges
+
+
+def test_lowering_the_threshold_still_changes_the_outcome() -> None:
+    """The regression the self-veto caused, stated directly."""
+    rows = [
+        (rid, "Jayesh Patel", "12 Shreeji Soc, Maninagar, Ahmedabad 380008", "9825012345")
+        for rid in ("a", "b", "c")
+    ]
+    records = norm(rows)
+
+    def banded(threshold: float):
+        """Pairs decided the way the pipeline would at this threshold."""
+        weights = weights_config().with_overrides(
+            auto_merge=threshold, review_low=0.50
+        )
+        pairs = [
+            pair("a", "b", 0.80, "merge" if threshold <= 0.80 else "review"),
+            pair("b", "c", 0.55, "merge" if threshold <= 0.55 else "review"),
+        ]
+        return cluster_records(records, pairs, weights)
+
+    strict = banded(0.75)
+    loose = banded(0.50)
+    assert [e.member_ids for e in strict.entities] == [("a", "b"), ("c",)]
+    assert [e.member_ids for e in loose.entities] == [("a", "b", "c")]
+    assert len(loose.entities) < len(strict.entities)

@@ -97,6 +97,12 @@ async def request_log(request: Request, call_next) -> Response:
         raise
     elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
     response.headers["x-request-id"] = request_id
+    # API responses are never cacheable. `/metrics` in particular is read from
+    # data/eval.json on every request, so a browser serving a stale copy shows
+    # numbers from a previous evaluation run — which is exactly the kind of
+    # quietly-wrong output a demo must not produce.
+    if not request.url.path.startswith("/static"):
+        response.headers.setdefault("Cache-Control", "no-store")
     if request.url.path not in {"/health"} and not request.url.path.startswith("/static"):
         log.info(
             "request",
@@ -157,8 +163,24 @@ app.include_router(router)
 # Web app
 # --------------------------------------------------------------------------- #
 
+class NoCacheStaticFiles(StaticFiles):
+    """Static files that always revalidate.
+
+    Starlette's StaticFiles sends an ETag and a Last-Modified but no
+    Cache-Control, so browsers apply *heuristic* freshness and happily serve a
+    stale asset without asking. On a demo that is a trap: edit a file, reload,
+    and see the old build. `no-cache` still allows a 304 against the ETag, so
+    this costs a conditional request, not a re-download.
+    """
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers.setdefault("Cache-Control", "no-cache")
+        return response
+
+
 if WEB_DIR.exists():
-    app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+    app.mount("/static", NoCacheStaticFiles(directory=WEB_DIR), name="static")
 
     @app.get("/", include_in_schema=False)
     def index() -> FileResponse:

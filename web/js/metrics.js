@@ -114,27 +114,43 @@ function evaluationSection(evaluation) {
 
 function sweepSection(sweep, evaluation) {
   if (!sweep?.length) return "";
-  const best = Math.max(...sweep.map((r) => r.pairwise_f1));
+  const scores = sweep.map((r) => r.pairwise_f1);
+  const best = Math.max(...scores);
+  const worst = Math.min(...scores);
   const current = evaluation.pipeline.auto_merge;
+  const span = Math.max(best - worst, 0.0001);
+
+  // Scaled between the worst and best point, not from zero. Every F1 here is
+  // between 0.76 and 0.96, so a zero-based axis renders the whole sweep as a
+  // flat wall of identical bars and hides the only thing the chart is for.
   const bars = sweep
     .map((row) => {
-      const height = Math.max(2, Math.round((row.pairwise_f1 / best) * 100));
+      const height = 8 + ((row.pairwise_f1 - worst) / span) * 92;
       const cls =
         row.auto_merge === current ? "current" : row.pairwise_f1 === best ? "best" : "";
-      return `<div class="sweep-bar ${cls}" style="height:${height}%"
+      return `<div class="sweep-bar ${cls}" style="height:${height.toFixed(1)}%"
         data-label="${row.auto_merge} → F1 ${fixed(row.pairwise_f1)} · P ${fixed(row.pairwise_precision)} · R ${fixed(row.pairwise_recall)}"></div>`;
     })
     .join("");
+
+  // Describe the plateau from the data rather than asserting a shape that
+  // was true of an earlier configuration.
+  const plateau = sweep.filter((r) => best - r.pairwise_f1 <= 0.002);
+  const lo = Math.min(...plateau.map((r) => r.auto_merge));
+  const hi = Math.max(...plateau.map((r) => r.auto_merge));
+  const currentRow = sweep.find((r) => r.auto_merge === current);
 
   return `
     <h3 class="section-title">Threshold sweep — pairwise F1 by merge threshold</h3>
     <div class="metric-card">
       <div class="sweep-chart">${bars}</div>
-      <div class="sweep-axis"><span>${sweep[0].auto_merge}</span><span>${sweep[sweep.length - 1].auto_merge}</span></div>
+      <div class="sweep-axis"><span>${sweep[0].auto_merge}</span><span>F1 ${fixed(worst)} – ${fixed(best)}</span><span>${sweep[sweep.length - 1].auto_merge}</span></div>
       <p class="hint" style="margin-top:8px">
         Blue is the shipped default (${current}); green is the measured optimum.
-        The curve is flat above 0.84, so the default is not balanced on a knife
-        edge — a customer who wants more precision moves one line of config.
+        F1 is within 0.002 of its peak across <strong>${lo}–${hi}</strong>, so the
+        default sits on a plateau rather than a knife edge${
+          currentRow ? ` — it scores ${fixed(currentRow.pairwise_f1)}` : ""
+        }. A customer who wants more precision than recall moves one line of config.
       </p>
     </div>`;
 }

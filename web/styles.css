@@ -371,7 +371,7 @@ mark { background: var(--merge-soft); color: var(--merge); border-radius: 3px; p
   margin: 18px 0 8px; font-size: 0.78rem; text-transform: uppercase;
   letter-spacing: 0.06em; color: var(--text-muted);
 }
-.sweep-chart { display: flex; align-items: flex-end; gap: 2px; height: 130px; margin-top: 8px; }
+.sweep-chart { display: flex; align-items: flex-end; gap: 3px; height: 150px; margin-top: 8px; }
 .sweep-bar { flex: 1; background: var(--surface-3); border-radius: 2px 2px 0 0; position: relative; min-width: 4px; }
 .sweep-bar.best { background: var(--merge); }
 .sweep-bar.current { background: var(--accent); }
@@ -381,7 +381,7 @@ mark { background: var(--merge-soft); color: var(--merge); border-radius: 3px; p
   background: var(--text); color: var(--bg); font-size: 0.68rem;
   font-family: var(--mono); padding: 3px 6px; border-radius: 4px; z-index: 5;
 }
-.sweep-axis { display: flex; justify-content: space-between; font-size: 0.66rem; color: var(--text-muted); font-family: var(--mono); margin-top: 3px; }
+.sweep-axis { display: flex; justify-content: space-between; align-items: baseline; font-size: 0.66rem; color: var(--text-muted); font-family: var(--mono); margin-top: 3px; }
 
 /* ---------------------------------------------------------------- misc --- */
 

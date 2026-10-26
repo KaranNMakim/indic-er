@@ -3,6 +3,27 @@
 All notable changes to indic-er. Phases follow the build order in
 [PLAN.md](PLAN.md).
 
+## Fixes found while preparing the demo screenshot
+
+- **A merge edge could veto its own merge.** `transitivity.veto_below` and
+  `auto_merge` are independent settings, so any threshold below the veto floor
+  put merge edges into the rejection index, where each one blocked itself.
+  Every sweep point at or under 0.70 then returned identical numbers — the
+  threshold sweep was a flat line that looked plausible and meant nothing. The
+  shipped configuration was never affected (the floor sits below `auto_merge`),
+  so the headline figures are unchanged, but the published sweep was wrong.
+- **The sweep chart scaled from zero**, so a range of 0.80-0.96 rendered as a
+  wall of identical bars. It now scales between its own minimum and maximum,
+  and the caption describes the plateau computed from the data instead of
+  asserting a shape that was true of an earlier configuration.
+- **Stale assets and stale metrics.** Static files are served with
+  `Cache-Control: no-cache` and API responses with `no-store`. Starlette sends
+  an ETag but no `Cache-Control`, so browsers applied heuristic freshness and
+  served an old build — and an old `/metrics` payload, which rendered numbers
+  from a previous evaluation run.
+
+376 tests.
+
 ## Transitivity check
 
 A pairwise score carries no transitivity guarantee: A~B and B~C can both clear

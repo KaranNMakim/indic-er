@@ -50,7 +50,13 @@ truth. Reproduce with `make eval`; full detail in
 | ground truth | 1.000 | 1.000 | 1.000 | 1.000 | 1,302 | 8 |
 
 **12.9× the fuzzy baseline on pairwise F1**, with 168 false-positive pairs
-against the baseline's 101,138. Blocking recall is 0.9956, so only 41 of 9,424
+against the baseline's 101,138.
+
+![The metrics page: headline figures, pipeline vs baseline, and the threshold
+sweep](docs/img/metrics.jpg)
+
+*The metrics page in the running app. Green is the measured optimum on the
+sweep, blue the shipped default.* Blocking recall is 0.9956, so only 41 of 9,424
 true pairs are unreachable before scoring even starts.
 
 The baseline is a real implementation, not a strawman: exact match then

@@ -214,6 +214,13 @@ def build_rejection_index(
     """
     index: dict[str, dict[str, float]] = {}
     for pair in pairs:
+        # A pair we are merging on can never also be evidence against itself.
+        # Without this guard, any threshold below `veto_below` puts merge
+        # edges into the rejection index, where they veto their own merge —
+        # every sweep point at or under the veto floor then returns identical
+        # numbers, because nothing below it can ever merge.
+        if pair.decision == "merge" and pair.override != HUMAN_REJECT:
+            continue
         rejected = (
             pair.override == HUMAN_REJECT
             or pair.score < weights.transitivity_veto_below
