@@ -11,18 +11,62 @@ from app.core.normalize import normalize_record
 from app.core.pipeline import match_two, resolve
 
 
-def test_the_motivating_example_resolves_to_one_entity(
+def test_the_motivating_example_merges_what_the_evidence_supports(
     jayesh_records: list[InputRecord],
 ) -> None:
-    """Three records, three scripts, three source systems, one person."""
+    """Two records merge automatically; the third is referred to a human.
+
+    r1 ("Jayeshbhai Patel", Gujarati-script r2) share a phone number, so they
+    merge at 0.99. r3 ("J. Patil") has an initial instead of a given name, a
+    variant surname, no phone and no house number, and scores 0.835 — just
+    under the 0.84 threshold the sweep chose.
+
+    Review is the correct answer there, not a shortcoming: on that evidence
+    the records genuinely might be two people, and the next test shows what
+    happens when a reviewer says they are not. Lowering the threshold to
+    swallow this pair costs more precision across the dataset than it buys
+    (see docs/eval-report.md section 4).
+    """
     result = resolve(jayesh_records)
+    assert len(result.entities) == 2
+
+    merged = next(e for e in result.entities if e.size == 2)
+    assert merged.canonical_name == "Jayesh Patel"
+    assert set(merged.sources) == {"kyc", "wallet"}
+    assert merged.canonical_address.pincode == "380008"
+    assert merged.canonical_phone == "9825012345"
+
+    assert any(p.pair_id == "r1::r3" and p.decision == "review" for p in result.pairs)
+
+
+def test_a_reviewer_completes_the_motivating_example(
+    jayesh_records: list[InputRecord],
+) -> None:
+    """The human-in-the-loop half of the headline example."""
+    result = resolve(jayesh_records, overrides={"r1::r3": "accept"})
     assert len(result.entities) == 1
     entity = result.entities[0]
     assert entity.size == 3
     assert entity.canonical_name == "Jayesh Patel"
     assert set(entity.sources) == {"kyc", "wallet", "logistics"}
-    assert entity.canonical_address.pincode == "380008"
-    assert entity.canonical_phone == "9825012345"
+    assert entity.review_state == "human_confirmed"
+
+
+def test_the_canonical_name_is_the_consensus_spelling() -> None:
+    """Not the longest string — the spelling the sources agree on.
+
+    Without the consensus tiebreak this cluster published "Pattel", the one
+    spelling in it that is a typo, because a stray middle initial made that
+    record's display name the longest.
+    """
+    records = [
+        InputRecord(id="a", name="Jayeshbhai Patel", phone="9825012345"),
+        InputRecord(id="b", name="જયેશ પટેલ", phone="+91 98250 12345"),
+        InputRecord(id="c", name="Shri Jayesh R. Pattel", phone="098250-12345"),
+    ]
+    result = resolve(records)
+    assert len(result.entities) == 1
+    assert result.entities[0].canonical_name == "Jayesh Patel"
 
 
 def test_a_different_person_with_the_same_name_stays_separate(
@@ -46,8 +90,8 @@ def test_an_unrelated_record_is_not_merged(
     jayesh_records: list[InputRecord], unrelated_record: InputRecord
 ) -> None:
     result = resolve([*jayesh_records, unrelated_record])
-    assert len(result.entities) == 2
-    assert {e.size for e in result.entities} == {3, 1}
+    assert any(e.member_ids == ("x1",) for e in result.entities)
+    assert not any("x1" in e.member_ids and e.size > 1 for e in result.entities)
 
 
 def test_resolve_is_deterministic(jayesh_records: list[InputRecord]) -> None:
@@ -80,9 +124,12 @@ def test_a_single_record_is_one_entity() -> None:
 def test_duplicate_rate_is_the_headline_number(
     jayesh_records: list[InputRecord],
 ) -> None:
-    """Three records collapsing to one entity is a 67% duplicate rate."""
+    """Three records collapsing to two entities is a 33% duplicate rate."""
     result = resolve(jayesh_records)
-    assert result.stats["duplicate_rate"] == pytest.approx(0.6667, abs=1e-3)
+    assert result.stats["duplicate_rate"] == pytest.approx(0.3333, abs=1e-3)
+
+    confirmed = resolve(jayesh_records, overrides={"r1::r3": "accept"})
+    assert confirmed.stats["duplicate_rate"] == pytest.approx(0.6667, abs=1e-3)
 
 
 def test_stats_account_for_every_pair(jayesh_records: list[InputRecord]) -> None:
@@ -153,7 +200,7 @@ def test_a_rejected_override_splits_an_entity(
     jayesh_records: list[InputRecord],
 ) -> None:
     baseline = resolve(jayesh_records)
-    assert len(baseline.entities) == 1
+    assert len(baseline.entities) == 2
     overridden = resolve(
         jayesh_records, overrides={"r1::r2": "reject", "r1::r3": "reject", "r2::r3": "reject"}
     )

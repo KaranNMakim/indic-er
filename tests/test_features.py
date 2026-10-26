@@ -136,7 +136,65 @@ def test_landmark_agreement_survives_abbreviation_and_synonym() -> None:
 def test_address_core_agrees_across_written_variants() -> None:
     a = rec("a", "X", "12, Shreeji Soc., Nr. Swaminarayan Mandir, Maninagar, Ahmedabad 380008")
     b = rec("b", "Y", "Shreeji Society, Maninagar, Amdavad, 380 008")
-    assert f_address_core(a, b).value > 0.85
+    assert f_address_core(a, b).value > 0.70
+
+
+def test_address_core_separates_two_societies_in_one_locality() -> None:
+    """The false-positive class that cost the most precision.
+
+    Two different households, same locality and pincode, different society.
+    Before `core_tokens` dropped the generic tokens, "dadar", "west" and
+    "society" agreed three times over and outvoted the building name, scoring
+    0.93. Only the building name should count here.
+    """
+    a = rec("a", "X", "Nandanvan Society, Dadar West, Mumbai 400028")
+    b = rec("b", "Y", "12/A, Vrundavan Society, Opp. Water Tank, Dadar West, Mumbai, 400028")
+    different = f_address_core(a, b).value
+
+    same = f_address_core(
+        rec("c", "X", "Nandanvan Society, Dadar West, Mumbai 400028"),
+        rec("d", "Y", "12/A, Nandanvan Soc., Opp. Water Tank, Dadar West, Mumbai, 400028"),
+    ).value
+
+    # "Nandanvan" and "Vrundavan" are genuinely similar strings — both end in
+    # "van" — so this does not go to zero, and it should not. What matters is
+    # the contrast: the same society written two ways must score clearly
+    # higher than two different societies in the same locality. Before the
+    # generic tokens were dropped, both scored ~0.93 and the contrast was gone.
+    # `same` is capped at 0.85 rather than 1.0 because only one distinctive
+    # token is available on the shorter side — see `_informativeness_penalty`.
+    assert different < 0.70
+    assert same >= 0.85
+    assert same - different > 0.20
+
+
+def test_house_number_is_compared() -> None:
+    """Two flats in one society are two households."""
+    from app.core.features import f_house_number
+
+    same = f_house_number(
+        rec("a", "X", "12, Shreeji Soc, Maninagar 380008"),
+        rec("b", "Y", "12 Shreeji Society, Maninagar 380008"),
+    )
+    assert same.value == 1.0
+
+    different = f_house_number(
+        rec("a", "X", "111, Harikrupa Society, Bhavnagar 364001"),
+        rec("b", "Y", "46/A, Harikrupa Society, Bhavnagar 364001"),
+    )
+    assert different.value == 0.0
+
+    wing = f_house_number(
+        rec("a", "X", "12, Shreeji Soc, Maninagar 380008"),
+        rec("b", "Y", "B-12, Shreeji Society, Maninagar 380008"),
+    )
+    assert wing.value == 0.70
+
+    missing = f_house_number(
+        rec("a", "X", "Shreeji Soc, Maninagar 380008"),
+        rec("b", "Y", "12 Shreeji Society, Maninagar 380008"),
+    )
+    assert missing.value is None
 
 
 # ----------------------------------------------- missing fields are neutral #
@@ -239,10 +297,50 @@ def test_identical_names_alone_cannot_reach_the_merge_threshold() -> None:
     assert name_weight < weights_config().auto_merge
 
 
-def test_name_only_records_do_merge_a_documented_limitation() -> None:
-    """With no other field present there is nothing else to go on."""
+def test_name_only_records_are_held_for_review_not_merged() -> None:
+    """The evidence gate, and the reason it exists.
+
+    Two records that agree on a name and have no other comparable field score
+    near 1.00, because dropping the missing features renormalises the name
+    ones. Merging on that was what chained 4,702 records into a single entity
+    on the full dataset. The gate holds the pair at review instead — which is
+    the honest answer, not a rejection.
+    """
     pair = score_pair(rec("a", "Jayesh Patel"), rec("b", "Jayesh Patil"))
+    assert pair.score > 0.9
+    assert pair.decision == "review"
+    assert pair.gate and "too little to merge" in pair.gate
+
+
+def test_one_non_name_signal_is_enough_to_pass_the_gate() -> None:
+    """A shared phone is exactly the distinguishing evidence the gate wants."""
+    pair = score_pair(
+        rec("a", "Jayesh Patel", phone="9825012345"),
+        rec("b", "Jayesh Patil", phone="+91 98250 12345"),
+    )
     assert pair.decision == "merge"
+    assert pair.gate is None
+
+
+def test_the_gate_rejects_name_agreement_with_no_outside_support() -> None:
+    """Enough evidence computed, but none of it outside the name."""
+    weights = weights_config().with_overrides()
+    object.__setattr__(weights, "min_evidence_weight", 0.0)
+    pair = score_pair(rec("a", "Jayesh Patel"), rec("b", "Jayesh Patil"), weights)
+    assert pair.decision == "review"
+    assert pair.gate and "nothing outside the name" in pair.gate
+
+
+def test_the_gate_can_be_turned_off() -> None:
+    weights = weights_config().with_overrides(gate_enabled=False)
+    pair = score_pair(rec("a", "Jayesh Patel"), rec("b", "Jayesh Patil"), weights)
+    assert pair.decision == "merge"
+
+
+def test_the_gate_never_turns_a_pair_into_a_rejection() -> None:
+    """Holding for review is a question; rejecting would be a wrong answer."""
+    pair = score_pair(rec("a", "Jayesh Patel"), rec("b", "Jayesh Patil"))
+    assert pair.decision != "reject"
 
 
 def test_pair_id_is_order_independent() -> None:

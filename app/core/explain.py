@@ -28,6 +28,7 @@ FEATURE_LABEL = {
     "name_phonetic": "name sound",
     "name_rarity": "name distinctiveness",
     "address_core": "address",
+    "house_number": "house number",
     "pincode": "pincode",
     "landmark": "landmark",
     "phone": "phone",

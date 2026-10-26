@@ -3,92 +3,153 @@
 All notable changes to indic-er. Phases follow the build order in
 [PLAN.md](PLAN.md).
 
+## Phase 5 — Data, evaluation and docs
+
+- **Synthetic data generator** (`data/generate.py`, pools in `data/pools.yaml`):
+  5,000 records from 1,302 true entities, seeded and reproducible. Noise is the
+  noise Indian data has — three scripts, curated Latin spelling variants,
+  honorifics prefixed and fused, initials, address drift, five phone formats,
+  absent fields — plus same-name twins and deliberate common-surname crowding.
+  Entities are kept distinguishable from their own data (no two share a name,
+  locality and building), because an unanswerable pair measures the generator
+  rather than the matcher.
+- **Evaluation** (`app/evaluation`): pairwise P/R/F1 and B-cubed, blocking
+  recall, a 23-point threshold sweep, six scoring ablations, four blocking
+  ablations, and per-slice recall by failure mode. Features are computed once
+  and re-combined, so the sweep and ablations cost seconds rather than an hour.
+- **`docs/eval-report.md` is generated**, not written: every number comes from
+  the run that produced it.
+- **README** with a mermaid architecture diagram, what is real vs mocked, and
+  productisation notes (data acquisition, scale, DPDP compliance, pricing).
+- **`docs/demo-script.md`**: three flows that work end to end.
+
+### Measured results
+
+| | pairwise F1 | B³ F1 | precision | recall |
+|---|---|---|---|---|
+| indic-er | **0.922** | **0.957** | 0.923 | 0.922 |
+| baseline (exact + fuzzy) | 0.074 | 0.324 | 0.040 | 0.452 |
+
+Blocking recall 0.9956. 364 tests, 97% coverage on `app/core`.
+
+## Phase 4 — Web app
+
+- Playground (CSV/JSON paste or file drop, threshold sliders, entity cards with
+  the full normalization trace, and a "Why?" panel showing per-feature
+  contributions and highlighted matching tokens).
+- Review queue with keyboard shortcuts (`A`/`R`/`S`/`U`), ordered by
+  uncertainty, showing live threshold suggestions from accumulated decisions.
+- Cytoscape cluster graph with per-node and per-edge provenance.
+- Metrics page comparing the pipeline to the baseline, with the sweep,
+  ablations and per-slice recall — and the live seeded numbers kept visibly
+  separate from the ground-truth evaluation.
+- No build step: ES modules, vendored Cytoscape, hand-written CSS, light/dark,
+  responsive. Entity disclosures are keyboard-operable and expose
+  `aria-expanded`.
+
+## Phase 3 — API
+
+- `POST /resolve`, `POST /match`, `GET /entities/{id}`, `GET /review-queue`,
+  `POST /review/{pair_id}`, `GET /metrics`, plus `/health`, `/ontology`,
+  `/showcase`, `/seed` and `/graph/{id}`.
+- Response sizes capped deliberately: a 5,000-record resolve produces ~330k
+  scored pairs, so merged and review-band pairs are returned and rejected ones
+  counted.
+- Structured logging with a per-request correlation id; the web app is served
+  from the same origin, so the demo needs no CORS and no second process.
+- `app/api/seed.py` pre-resolves the demo dataset so first paint is instant.
+
+### Fixed while building
+
+- **Graph writes committed per row**, making a 4,700-fact projection take 41
+  seconds. Added a `bulk()` transaction context; it is now instant.
+
 ## Phase 2 — Matching pipeline
 
-- **Pairwise features** (`app/core/features.py`): name spelling, name sound,
-  name distinctiveness, address core, pincode, landmark and phone. Two
-  governing rules — a missing field returns `None` and is dropped from both
-  sides of the weighted mean, so absence is neutral; and names are compared by
-  greedy token alignment, so reordering and dropped middle names cost nothing
-  while an initial against a full token scores 0.90.
-- **Weights rebalanced** so the name features sum to 0.46, below the 0.72
-  merge threshold: two different people called Jayesh Patel cannot be merged
-  on their name alone. The name-only corollary is documented and measured.
-- **Blocking** (`app/core/blocking.py`): five keys chosen so a true pair stays
-  reachable when several fields are wrong. Oversized blocks are skipped rather
-  than truncated, because truncation silently strands specific records.
-- **Clustering** (`app/core/cluster.py`): connected components plus a conflict
-  check. When two cluster members disagree on hard evidence, the weakest
-  `same_as` edge on the path between them is cut — unless it scores above the
-  override threshold, or a reviewer confirmed it, in which case the conflict is
-  reported rather than acted on.
-- **Canonical records** with merge provenance per member pair, every name
-  variant, every source script, and the most complete address in the cluster.
-- **Baseline** (`app/core/baseline.py`): exact match plus Jaro-Winkler on raw
-  strings, blocked on two characters. Implemented properly rather than
-  strawmanned — it catches a trailing suffix and a plain typo, and fails on a
-  leading honorific, a script change and Patel/Patil.
-- **Review queue** (`app/core/review.py`): SQLite-backed, ordered by
-  uncertainty, applied as hard overrides before clustering on the next run. A
-  decided pair never returns to the queue. `threshold_shift()` reports where
-  the accumulated decisions say the threshold should be, and says so honestly
-  when the decisions overlap and no threshold can reproduce them.
-- **Explanations** (`app/core/explain.py`): deterministic, rule-based,
-  per-feature contributions plus a sentence that names the strongest and
-  weakest evidence, says what could not be compared, and ranks an exact phone
-  or pincode match above three middling name features because that is how a
-  reviewer weighs it.
-- **Pipeline** (`app/core/pipeline.py`): `resolve()` end to end with stage
-  timings and a duplicate rate; `match_two()` scores any two records directly,
-  including pairs blocking would never propose.
-- 324 tests, 97% coverage on `app/core`.
+- **Pairwise features**: name spelling, name sound, name distinctiveness,
+  address core, house number, pincode, landmark, phone. A missing field returns
+  `None` and is dropped from both sides of the weighted mean, so absence is
+  neutral. Names are compared by greedy token alignment, so reordering and
+  dropped middle names cost nothing.
+- **Blocking**: five keys chosen so a true pair stays reachable when several
+  fields are wrong. Oversized blocks are skipped rather than truncated.
+- **Clustering**: conflict-aware agglomeration — merge edges applied
+  strongest-first, each refused if the cluster it would create trips a conflict
+  rule.
+- **Review queue**: SQLite-backed, ordered by uncertainty, applied as hard
+  overrides before clustering. `threshold_shift()` reports where the decisions
+  say the threshold should be, and says so plainly when they overlap and no
+  threshold can reproduce them.
+- **Baseline**: exact plus Jaro-Winkler on raw strings — implemented properly,
+  not strawmanned.
+- **Explanations**: deterministic, rule-based, with per-feature contributions.
+
+### Fixed while building (all found by measurement, not review)
+
+- **Transitive-closure blowup.** Connected components collapsed 4,702 of 5,000
+  records into one "entity". Replaced with conflict-aware agglomeration that
+  checks before the union instead of splitting after; largest cluster fell to
+  19 and the run went from 43s to 17s.
+- **Name-only bridges.** Because missing features renormalise the rest, a pair
+  whose only comparable fields were the name scored 1.00 on an identical common
+  name and chained unrelated clusters together. Added the **evidence gate**:
+  enough of the weight must be computable *and* something outside the name must
+  support the pair, else the pair is held at review, never rejected. Worth
+  −0.335 F1 if removed — the single biggest contributor.
+- **The address parser threw away the house number.** `core_tokens` drops short
+  and numeric tokens by design, which also dropped "111" and "46/A", so two
+  different households in one society scored 1.00 on address. Added a
+  `house_number` feature.
+- **Generic address tokens swamped the distinctive one.** "society", "dadar"
+  and "west" agreed three times over and outvoted the building name, scoring
+  0.93 for two different Nilesh Pawars. `core_tokens` now excludes type words,
+  the locality and the city — the area signal is already carried by `pincode`.
+- **The gate blocked pairs whose phone matched exactly.** An exact match on a
+  hard identifier now waives the weight quorum.
+- **Blocking missed initials.** "G. Pillai" and "Ganesan Pillai" share no full
+  phonetic token. Added the `phonetic_initial_sorted` key; blocking recall rose
+  from 0.951 to 0.996.
+- **Thresholds were guesses.** The sweep showed 0.72 was far too low
+  (P=0.525). Moved to 0.84, the joint optimum.
+- **Canonical name was the longest string**, so a cluster published the one
+  spelling in it that was a typo. Now the consensus spelling.
+- **Trade words were stripped as legal suffixes**, merging "Patel Trading" with
+  "Patel Textiles" and reducing a business's canonical name to "Patel". Only
+  the legal wrapper is stripped now.
 
 ## Phase 1 — Normalization
 
-- **Script detection** (`app/core/script_detect.py`) for Latin, Devanagari,
-  Gujarati and Tamil, by Unicode block. Any Indic presence wins over a Latin
-  majority, so `"જયેશ Patel"` is still transliterated instead of being passed
-  through half-unreadable.
-- **Transliteration** (`app/core/translit.py`): abugida-aware, table-driven
-  from `config/translit.yaml`. Handles the inherent vowel, matras, virama
-  clusters and Hindi/Gujarati word-final schwa deletion, so राम → `ram` and
-  लक्ष्मी → `lakshmi`. Latin city variants (Amdavad, Bombay, Bangalore) fold
-  to one spelling.
-- **Indic phonetic key** (`app/core/phonetic.py`): five documented stages
-  driven by `config/phonetic.yaml`. Patel/Patil/Pattel → `PTL`,
-  Jayesh/Jaishe/Jaysh → `JS`, Shah/Sah/Chah → `S`, Lakshmi/Laxmi → `LKSM`.
-  Recall-first by design; collisions are resolved downstream by scoring.
-- **Name normalization** (`app/core/normalize.py`): honorifics as whole
-  tokens, affectionate suffixes as token tails (`Jayeshbhai` → `jayesh`),
-  business legal suffixes captured rather than discarded. Everything removed
-  is kept for the audit trail. Guards against destroying real names
-  (`Juneja`, `Gowda`) and against eating a stem vowel (`Kokilaben` → `kokila`,
-  not `kokil`).
-- **Phone normalization** to the last 10 digits, rejecting placeholders so a
-  junk phone never becomes a matching signal.
-- **Address parsing** (`app/core/address.py`): pincode anywhere in the string
-  including `380 008`, abbreviation expansion, landmark phrase capture
-  (`Nr. Swaminarayan Mandir` → `swaminarayan temple`), city/state alias
-  folding, and an order-insensitive `core_tokens` set.
+- **Script detection** for Latin, Devanagari, Gujarati and Tamil. Any Indic
+  presence wins over a Latin majority, so `"જયેશ Patel"` is still
+  transliterated instead of passed through half-unreadable.
+- **Transliteration**: abugida-aware and table-driven. Handles the inherent
+  vowel, matras, virama clusters and word-final schwa deletion, so राम → `ram`
+  and लक्ष्मी → `lakshmi`.
+- **Indic phonetic key**: Patel/Patil/Pattel → `PTL`, Jayesh/Jaishe/Jaysh →
+  `JS`, Shah/Sah/Chah → `S`, Lakshmi/Laxmi → `LKSM`. Recall-first by design;
+  collisions are resolved downstream by scoring.
+- **Name normalization**: honorifics as whole tokens, affectionate suffixes as
+  token tails, business legal suffixes captured rather than discarded.
+  Everything removed is kept for the audit trail, with guards against
+  destroying real names (`Juneja`, `Gowda`) and against eating a stem vowel
+  (`Kokilaben` → `kokila`, not `kokil`).
+- **Phone normalization** to the last 10 digits, rejecting placeholders.
+- **Address parsing**: pincode anywhere including `380 008`, abbreviation
+  expansion, landmark phrase capture, city/state alias folding, and an
+  order-insensitive token set.
 
 ## Phase 0 — Scaffold and knowledge-graph layer
 
 - Project scaffold, `pyproject.toml`, ruff and pytest configuration.
 - `tasks.py` task runner with a `Makefile` and `make.bat` delegating to it, so
   `make demo`, `make test` and `make eval` work with or without GNU make.
-- All domain knowledge externalised to `config/*.yaml`: ontology, honorifics
-  and suffixes, phonetic folding rules, address vocabulary, scoring weights.
-- **Ontology** (`app/kg/ontology.py`): YAML in, validated Pydantic model out,
-  JSON-LD and Turtle export via rdflib. A relation pointing at an undeclared
-  class, an unknown property type, or a dropped provenance field fails the
-  load.
-- **Provenance** (`app/kg/provenance.py`): every fact carries source,
-  timestamp, confidence and method (`rule` | `model` | `human`).
-- **GraphStore** (`app/kg/graph_store.py`): interface plus a NetworkX +
-  SQLite implementation, with ontology validation on every write and a
-  Cytoscape export. Swappable for Neo4j/Kuzu without touching `app/core`.
-- **LLMClient** (`app/kg/llm.py`): interface, deterministic offline mock, and
-  a live Anthropic client selected by `LLM_MODE`. The matching core does not
-  import it — enforced by a test.
-- `/health` and `/ontology` endpoints; structured logging with a per-request
-  correlation id.
+- All domain knowledge externalised to `config/*.yaml`.
+- **Ontology**: YAML in, validated Pydantic model out, JSON-LD and Turtle
+  export. A relation pointing at an undeclared class, an unknown property type
+  or a dropped provenance field fails the load.
+- **Provenance**: every fact carries source, timestamp, confidence and method.
+- **GraphStore**: interface plus a NetworkX + SQLite implementation with
+  ontology validation on every write.
+- **LLMClient**: interface, deterministic offline mock, live Anthropic client.
+  The matching core does not import it — enforced by a test.
+- `/health` and `/ontology`; structured logging with a correlation id.

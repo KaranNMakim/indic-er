@@ -23,10 +23,10 @@
 # available answer, and the eval report measures it as its own slice.
 features:
   name_string:
-    weight: 0.18
+    weight: 0.16
     description: Token-set similarity on the normalized Latin name.
   name_phonetic:
-    weight: 0.22
+    weight: 0.20
     description: Agreement of Indic phonetic keys, matched token to token.
   name_rarity:
     weight: 0.06
@@ -35,16 +35,24 @@ features:
       1.0 when at least one matching token is distinctive, lower when the
       only shared token is Patel/Shah/Kumar-class.
   address_core:
-    weight: 0.24
-    description: Order-tolerant similarity of house/building/locality tokens.
+    weight: 0.20
+    description: Order-tolerant similarity of building and locality tokens.
+  house_number:
+    weight: 0.12
+    description: >
+      House / flat / plot number: 1.0 exact, 0.7 same number with a wing or
+      block letter on one side only, 0.0 different. The most discriminating
+      part of an address — two different flats in one society are two
+      different households, and `address_core` cannot see the difference
+      because it drops short and numeric tokens by design.
   pincode:
-    weight: 0.14
+    weight: 0.12
     description: 1.0 exact, 0.5 same sorting district, 0.0 otherwise.
   landmark:
-    weight: 0.06
+    weight: 0.05
     description: Landmark phrase agreement after abbreviation expansion.
   phone:
-    weight: 0.10
+    weight: 0.09
     description: 1.0 when the normalized last-10 digits are equal, else 0.0.
 
 # --------------------------------------------------------------------------- #
@@ -57,9 +65,55 @@ features:
 # Defaults are deliberately conservative: for a KYC-shaped use case a false
 # merge costs far more than a missed one, and the borderline band is where the
 # human reviewer earns their keep.
+#
+# These values are not guesses — they come from the threshold sweep in
+# `make eval`, which is reproduced in docs/eval-report.md:
+#
+#   auto_merge   pairwise P    R        F1       B-cubed F1   entities
+#   0.72         0.525         0.941    0.674    0.877        1208
+#   0.78         0.810         0.939    0.870    0.942        1363
+#   0.82         0.877         0.935    0.905    0.954        1406
+#   0.84         0.914         0.917    0.916    0.954        1467   <- chosen
+#   0.86         0.938         0.896    0.916    0.951        1526
+#   0.90         0.961         0.819    0.884    0.924        1723
+#
+# 0.84 is the joint optimum: the highest pairwise F1, tied-highest B-cubed F1,
+# and precision and recall within 0.003 of each other. 0.86 buys 2.4 points of
+# precision for 2.1 points of recall, which is the trade a KYC-shaped customer
+# might well prefer — it is one line in this file.
+#
+# review_low sits at 0.70 rather than lower on purpose. The band is where
+# human time is spent, so it has to be worth spending: below 0.70 the pairs
+# are overwhelmingly genuine non-matches and the queue becomes unworkable.
 thresholds:
-  auto_merge: 0.72
-  review_low: 0.55
+  auto_merge: 0.84
+  review_low: 0.70
+
+# --------------------------------------------------------------------------- #
+# Evidence gate
+# --------------------------------------------------------------------------- #
+# Weights alone cannot keep names from carrying a merge, because dropping
+# missing features renormalises the ones that remain. A pair where only the
+# name features could be computed scores purely on the name, so an identical
+# common name reaches 1.00 — and at scale those pairs act as bridges that
+# chain unrelated clusters into one blob through connected components.
+#
+# So auto-merge has an entry requirement as well as a threshold: enough of the
+# total weight must actually be computable, and at least one feature outside
+# the name family must support the pair. A pair that fails the gate is not
+# rejected — it is held at "review", which is the honest answer when the only
+# thing two records agree on is a name.
+evidence_gate:
+  enabled: true
+  # Of the total feature weight, how much must be computable (not None).
+  min_evidence_weight: 0.55
+  # At least one non-name feature must reach this value.
+  require_non_name_support: true
+  non_name_support_min: 0.5
+  # Features that settle identity on their own. An exact match on one of
+  # these waives both checks above — a shared phone number IS the
+  # distinguishing evidence the gate exists to demand.
+  strong_identifiers: [phone]
 
 # --------------------------------------------------------------------------- #
 # Blocking
@@ -76,6 +130,12 @@ blocking:
       enabled: true
     - name: phonetic_token_any
       description: Any single phonetic token (catches dropped middle names).
+      enabled: true
+    - name: phonetic_initial_sorted
+      description: >
+        One token reduced to its initial, the rest kept whole. Reunites
+        "G. Pillai" with "Ganesan Pillai", which share no full token and
+        whose only common token (the surname) sits in an oversized block.
       enabled: true
     - name: pincode
       description: Exact pincode.

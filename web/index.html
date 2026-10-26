@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>indic-er — entity resolution for Indian names and addresses</title>
+<link rel="stylesheet" href="/static/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🪢</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo" aria-hidden="true">🪢</span>
+    <div>
+      <h1>indic-er</h1>
+      <p class="tagline">Entity resolution for messy Indian names, businesses and addresses</p>
+    </div>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button class="tab" data-view="playground" role="tab" aria-selected="true">Playground</button>
+    <button class="tab" data-view="review" role="tab" aria-selected="false">Review queue <span class="badge" id="review-badge" hidden>0</span></button>
+    <button class="tab" data-view="graph" role="tab" aria-selected="false">Cluster graph</button>
+    <button class="tab" data-view="metrics" role="tab" aria-selected="false">Metrics</button>
+  </nav>
+  <div class="topbar-right">
+    <span class="pill" id="health-pill" title="Service status">connecting…</span>
+    <button class="icon-btn" id="theme-toggle" title="Toggle light / dark" aria-label="Toggle colour scheme">◐</button>
+  </div>
+</header>
+
+<main>
+
+<!-- ============================ PLAYGROUND ============================ -->
+<section class="view" id="view-playground" aria-labelledby="playground-heading">
+  <div class="split">
+
+    <div class="panel input-panel">
+      <div class="panel-head">
+        <h2 id="playground-heading">Records in</h2>
+        <div class="panel-actions">
+          <button class="btn btn-ghost" id="load-showcase">Load example</button>
+          <button class="btn btn-ghost" id="load-seeded">Load 200 from dataset</button>
+          <button class="btn btn-ghost" id="clear-input">Clear</button>
+        </div>
+      </div>
+      <p class="hint">
+        Paste <strong>CSV</strong> (with an <code>id,name</code> header) or a
+        <strong>JSON</strong> array. Drop a file anywhere on this panel.
+        Indic script is welcome — that is the point.
+      </p>
+      <textarea id="records-input" spellcheck="false" aria-label="Records to resolve"
+        placeholder="id,name,address,phone,source&#10;r1,Jayeshbhai Patel,&quot;12, Shreeji Soc., Nr. Swaminarayan Mandir, Maninagar, Ahmedabad 380008&quot;,+91 98250 12345,kyc"></textarea>
+      <div class="row">
+        <label class="field">
+          <span>Merge at</span>
+          <input type="range" id="auto-merge" min="0.5" max="0.98" step="0.01">
+          <output id="auto-merge-out">0.84</output>
+        </label>
+        <label class="field">
+          <span>Review from</span>
+          <input type="range" id="review-low" min="0.3" max="0.95" step="0.01">
+          <output id="review-low-out">0.70</output>
+        </label>
+      </div>
+      <div class="row">
+        <label class="checkbox"><input type="checkbox" id="apply-reviews" checked> Apply stored review decisions</label>
+        <label class="checkbox"><input type="checkbox" id="enqueue-review"> Add borderline pairs to the queue</label>
+      </div>
+      <button class="btn btn-primary btn-lg" id="run-resolve">Resolve</button>
+      <p class="error" id="input-error" hidden></p>
+    </div>
+
+    <div class="panel result-panel">
+      <div class="panel-head">
+        <h2>Entities out</h2>
+        <div class="panel-actions">
+          <input type="search" id="entity-filter" placeholder="Filter entities…" aria-label="Filter entities">
+          <button class="btn btn-ghost" id="download-result" hidden>Download JSON</button>
+        </div>
+      </div>
+      <div id="resolve-summary" class="summary" hidden></div>
+      <div id="entity-list" class="entity-list">
+        <div class="empty">
+          <p><strong>Nothing resolved yet.</strong></p>
+          <p>Press <em>Load example</em> then <em>Resolve</em> — fourteen records
+          that look like five different problems and are actually six entities.</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============================== REVIEW ============================== -->
+<section class="view" id="view-review" hidden aria-labelledby="review-heading">
+  <div class="panel">
+    <div class="panel-head">
+      <h2 id="review-heading">Review queue</h2>
+      <div class="panel-actions">
+        <select id="review-order" aria-label="Queue order">
+          <option value="uncertainty">Most uncertain first</option>
+          <option value="score_desc">Highest score first</option>
+          <option value="score_asc">Lowest score first</option>
+        </select>
+        <select id="review-state" aria-label="Queue filter">
+          <option value="pending">Pending</option>
+          <option value="all">All</option>
+        </select>
+      </div>
+    </div>
+    <p class="hint">
+      Pairs the pipeline will not decide on its own. A decision is stored and
+      applied as a <strong>hard override before clustering</strong> on the next
+      run, so the same pair is never asked about twice.
+      <kbd>A</kbd> accept · <kbd>R</kbd> reject · <kbd>S</kbd> skip · <kbd>U</kbd> undo last
+    </p>
+    <div class="queue-stats" id="queue-stats"></div>
+    <div class="threshold-note" id="threshold-note"></div>
+    <div id="review-card-wrap"></div>
+    <div id="review-rest" class="review-rest"></div>
+  </div>
+</section>
+
+<!-- ============================== GRAPH =============================== -->
+<section class="view" id="view-graph" hidden aria-labelledby="graph-heading">
+  <div class="panel">
+    <div class="panel-head">
+      <h2 id="graph-heading">Cluster graph</h2>
+      <div class="panel-actions">
+        <select id="graph-entity" aria-label="Entity to show"></select>
+        <button class="btn btn-ghost" id="graph-refit">Re-fit</button>
+      </div>
+    </div>
+    <p class="hint">
+      Records are nodes, <code>same_as</code> edges carry the pair score, and the
+      square node is the canonical entity. Click anything to see its provenance.
+    </p>
+    <div class="graph-layout">
+      <div id="cy" class="cy"></div>
+      <aside class="graph-side" id="graph-side">
+        <p class="muted">Click a node or an edge.</p>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- ============================= METRICS ============================== -->
+<section class="view" id="view-metrics" hidden aria-labelledby="metrics-heading">
+  <div class="panel">
+    <div class="panel-head"><h2 id="metrics-heading">Metrics</h2></div>
+    <div id="metrics-body"><p class="muted">Loading…</p></div>
+  </div>
+</section>
+
+</main>
+
+<footer class="footer">
+  <span>indic-er — proof of value. Synthetic data only; no real PII.</span>
+  <span><a href="/docs">API docs</a> · <a href="/ontology">ontology</a> · <a href="/health">health</a></span>
+</footer>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="/static/vendor/cytoscape.min.js"></script>
+<script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

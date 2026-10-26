@@ -60,7 +60,7 @@ def _parse(raw: str, config: AddressConfig) -> ParsedAddress:
     building = _clean_phrase(building, config)
     locality = _clean_phrase(locality, config)
 
-    core = _core_tokens(segments, config, landmark)
+    core = _core_tokens(segments, config, landmark, locality, city)
     return ParsedAddress(
         raw=raw,
         house=house,
@@ -215,23 +215,40 @@ def _clean_phrase(phrase: str | None, config: AddressConfig) -> str | None:
 
 
 def _core_tokens(
-    segments: list[str], config: AddressConfig, landmark: str | None
+    segments: list[str],
+    config: AddressConfig,
+    landmark: str | None,
+    locality: str | None,
+    city: str | None,
 ) -> tuple[str, ...]:
-    """The identifying tokens, deduplicated and sorted.
+    """The *distinctive* tokens, deduplicated and sorted.
 
     Sorted so comparison is order-insensitive: the same address written with
-    its segments in a different order yields the same set. Stopwords and
-    bare numbers are dropped — "flat", "floor", "block" and "2" appear in
-    every address and distinguish nothing.
+    its segments in a different order yields the same set.
+
+    What is excluded matters as much as what is kept. Dropped here:
+
+    * stopwords and bare numbers — "flat", "floor", "block", "2"
+    * building and locality **type** words — "society", "apartment", "nagar".
+      Every third address in a city ends in "Society"; the word carries no
+      identity, only the name in front of it does.
+    * the locality and city themselves. They are already extracted into their
+      own fields and the area signal is carried by ``pincode``, so leaving
+      them in here counted the same evidence twice — and worse, it swamped
+      the one token that distinguishes two households. Two different Nilesh
+      Pawars in Dadar West, one in Nandanvan Society and one in Vrundavan
+      Society, scored 0.93 on address because "dadar", "west" and "society"
+      agreed three times over and the building name was outvoted.
     """
-    tokens: set[str] = set()
-    for segment in segments:
-        for token in segment.split():
-            if len(token) < 3 or token in config.stopwords or token.isdigit():
-                continue
-            tokens.add(token)
+    excluded = set(config.stopwords) | config.building_markers | config.locality_markers
+    for phrase in (locality, city):
+        if phrase:
+            excluded.update(phrase.split())
+
+    def keep(token: str) -> bool:
+        return len(token) >= 3 and token not in excluded and not token.isdigit()
+
+    tokens = {token for segment in segments for token in segment.split() if keep(token)}
     if landmark:
-        for token in landmark.split():
-            if len(token) >= 3 and token not in config.stopwords and not token.isdigit():
-                tokens.add(token)
+        tokens.update(token for token in landmark.split() if keep(token))
     return tuple(sorted(tokens))

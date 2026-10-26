@@ -85,14 +85,29 @@ def test_display_form() -> None:
 @pytest.mark.parametrize(
     ("raw", "tokens"),
     [
-        ("Patel Trading Pvt. Ltd.", ("patel",)),
-        ("Patel Trading Company", ("patel",)),
+        ("Patel Trading Pvt. Ltd.", ("patel", "trading")),
+        ("Patel Trading Company", ("patel", "trading")),
         ("Patel & Sons", ("patel",)),
-        ("M/s Patel Enterprises", ("patel",)),
+        ("M/s Patel Enterprises", ("patel", "enterprises")),
+        ("Patel Textiles LLP", ("patel", "textiles")),
     ],
 )
-def test_business_suffixes_are_stripped(raw: str, tokens: tuple[str, ...]) -> None:
+def test_only_the_legal_wrapper_is_stripped(raw: str, tokens: tuple[str, ...]) -> None:
+    """Legal forms go; sector words stay.
+
+    "Pvt Ltd", "& Sons" and "LLP" say nothing about which business this is.
+    "Trading" and "Textiles" do — stripping them merged Patel Trading with
+    Patel Textiles, two different firms sharing a proprietor's surname, and
+    reduced the canonical name of a resolved business to the bare word
+    "Patel", which is the least identifying part of any Indian business name.
+    """
     assert normalize_name(raw, kind="business").tokens == tokens
+
+
+def test_two_sectors_under_one_surname_stay_apart() -> None:
+    trading = normalize_name("Patel Trading Pvt Ltd", kind="business")
+    textiles = normalize_name("Patel Textiles Pvt Ltd", kind="business")
+    assert trading.tokens != textiles.tokens
 
 
 def test_legal_suffix_is_captured_not_discarded() -> None:

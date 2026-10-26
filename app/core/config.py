@@ -180,6 +180,11 @@ class WeightsConfig:
     features: dict[str, FeatureSpec]
     auto_merge: float
     review_low: float
+    gate_enabled: bool
+    min_evidence_weight: float
+    require_non_name_support: bool
+    non_name_support_min: float
+    gate_strong_identifiers: tuple[str, ...]
     blocking_strategies: tuple[str, ...]
     max_block_size: int
     max_candidate_pairs: int
@@ -218,6 +223,7 @@ class WeightsConfig:
                 f"<= auto_merge ({auto_merge}) <= 1"
             )
 
+        gate = raw.get("evidence_gate") or {}
         blocking = raw.get("blocking") or {}
         strategies = tuple(
             str(s["name"]) for s in blocking.get("strategies", []) if s.get("enabled", True)
@@ -238,6 +244,13 @@ class WeightsConfig:
             features=features,
             auto_merge=auto_merge,
             review_low=review_low,
+            gate_enabled=bool(gate.get("enabled", True)),
+            min_evidence_weight=float(gate.get("min_evidence_weight", 0.0)),
+            require_non_name_support=bool(gate.get("require_non_name_support", False)),
+            non_name_support_min=float(gate.get("non_name_support_min", 0.5)),
+            gate_strong_identifiers=tuple(
+                str(name) for name in gate.get("strong_identifiers", ["phone"])
+            ),
             blocking_strategies=strategies,
             max_block_size=int(blocking.get("max_block_size", 120)),
             max_candidate_pairs=int(blocking.get("max_candidate_pairs", 400_000)),
@@ -260,6 +273,7 @@ class WeightsConfig:
         auto_merge: float | None = None,
         review_low: float | None = None,
         conflicts_enabled: bool | None = None,
+        gate_enabled: bool | None = None,
     ) -> WeightsConfig:
         """Return a copy with selected values replaced (used by ablations)."""
         features = dict(self.features)
@@ -278,6 +292,11 @@ class WeightsConfig:
             features=features,
             auto_merge=new_auto,
             review_low=min(new_low, new_auto),
+            gate_enabled=(self.gate_enabled if gate_enabled is None else gate_enabled),
+            min_evidence_weight=self.min_evidence_weight,
+            require_non_name_support=self.require_non_name_support,
+            non_name_support_min=self.non_name_support_min,
+            gate_strong_identifiers=self.gate_strong_identifiers,
             blocking_strategies=self.blocking_strategies,
             max_block_size=self.max_block_size,
             max_candidate_pairs=self.max_candidate_pairs,

@@ -38,7 +38,24 @@ def test_core_tokens_agree_across_the_variants() -> None:
     """Order-insensitive comparison is the point of ``core_tokens``."""
     cores = [set(parse_address(raw).core_tokens) for raw in SAME_PLACE]
     shared = set.intersection(*cores)
-    assert {"maninagar", "swaminarayan", "temple", "society"} <= shared
+    assert {"swaminarayan", "temple"} <= shared
+
+
+def test_core_tokens_exclude_everything_generic() -> None:
+    """What is left out is the point.
+
+    `society` is a building *type* and appears in a third of all addresses;
+    `maninagar` and `ahmedabad` are the locality and city, already extracted
+    into their own fields and already scored by `pincode`. Leaving them in
+    counted the same evidence twice and — worse — outvoted the one token that
+    distinguishes two households, so two different Nilesh Pawars in Dadar West
+    scored 0.93 on address.
+    """
+    core = set(parse_address(SAME_PLACE[0]).core_tokens)
+    assert "shreeji" in core
+    assert "society" not in core
+    assert "maninagar" not in core
+    assert "ahmedabad" not in core
 
 
 @pytest.mark.parametrize(

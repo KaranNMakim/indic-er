@@ -157,10 +157,12 @@ def _informativeness_penalty(left: Sequence[str], right: Sequence[str]) -> float
     evidence against the pair.
 
     What does genuinely weaken an address match is thinness in absolute terms:
-    agreeing on the single token "maninagar" is a locality, not an address.
+    agreeing on one token is a hint, agreeing on two is an address. Calibrated
+    for the distinctive-token sets `address_core` now produces (typically one
+    to four tokens), not for the raw token soup it used to receive.
     """
     shortest = min(len(left), len(right))
-    return min(1.0, 0.55 + 0.15 * shortest)
+    return min(1.0, 0.70 + 0.15 * shortest)
 
 
 def _landmark_penalty(left: Sequence[str], right: Sequence[str]) -> float:
@@ -318,6 +320,59 @@ def f_landmark(left: NormalizedRecord, right: NormalizedRecord) -> FeatureValue:
     )
 
 
+def f_house_number(left: NormalizedRecord, right: NormalizedRecord) -> FeatureValue:
+    """House / flat / plot number agreement.
+
+    The most discriminating part of an Indian address and the easiest to
+    overlook. ``address_core`` deliberately drops short and numeric tokens,
+    because "2" and "flat" appear in every address and identify nothing — but
+    that also dropped the house number, so two *different households in the
+    same society* scored 1.00 on address. On the full dataset that single
+    omission was the largest source of false merges: Rekha Prajapati at 111
+    Harikrupa Society and Rekha Prajapati at 46/A Harikrupa Society agreed on
+    name, building, locality and pincode, and nothing was left to tell them
+    apart.
+
+    So the house number gets its own feature, and a disagreement is real
+    evidence against the pair rather than noise inside an averaged token set.
+    """
+    house_left = left.address.house if left.address else None
+    house_right = right.address.house if right.address else None
+    if not house_left or not house_right:
+        return FeatureValue(
+            name="house_number", value=None, weight=0.0, detail="no house number on one side"
+        )
+
+    norm_left, norm_right = _normalise_house(house_left), _normalise_house(house_right)
+    if norm_left == norm_right:
+        return FeatureValue(
+            name="house_number", value=1.0, weight=0.0, detail=f"same house number {house_left}"
+        )
+
+    digits_left = "".join(ch for ch in norm_left if ch.isdigit())
+    digits_right = "".join(ch for ch in norm_right if ch.isdigit())
+    if digits_left and digits_left == digits_right:
+        # "12" vs "12A" vs "B-12": the same number with a wing or block letter
+        # on one side only. Common when one source records the wing and the
+        # other does not, so this is partial agreement, not disagreement.
+        return FeatureValue(
+            name="house_number",
+            value=0.70,
+            weight=0.0,
+            detail=f"same number, different wing or block ({house_left} vs {house_right})",
+        )
+    return FeatureValue(
+        name="house_number",
+        value=0.0,
+        weight=0.0,
+        detail=f"different house number ({house_left} vs {house_right})",
+    )
+
+
+def _normalise_house(house: str) -> str:
+    return "".join(ch for ch in house.lower() if ch.isalnum())
+
+
 def f_phone(left: NormalizedRecord, right: NormalizedRecord) -> FeatureValue:
     if not left.phone_last10 or not right.phone_last10:
         return FeatureValue(
@@ -338,6 +393,7 @@ FEATURE_FUNCTIONS: dict[str, Callable[[NormalizedRecord, NormalizedRecord], Feat
     "name_phonetic": f_name_phonetic,
     "name_rarity": f_name_rarity,
     "address_core": f_address_core,
+    "house_number": f_house_number,
     "pincode": f_pincode,
     "landmark": f_landmark,
     "phone": f_phone,
@@ -399,8 +455,77 @@ def combine(features: dict[str, FeatureValue]) -> float:
     return sum(f.value * f.weight for f in usable) / total_weight
 
 
-def decide(score: float, weights: WeightsConfig) -> Decision:
+NAME_FEATURE_PREFIX = "name_"
+
+
+def evidence_gate(features: dict[str, FeatureValue], weights: WeightsConfig) -> str | None:
+    """Why this pair may not auto-merge, or ``None`` if it may.
+
+    The threshold alone is not enough. Because missing features are dropped
+    and the rest renormalise, a pair whose only computable features are the
+    name ones is scored purely on its name — so two records that both say
+    "Jayesh Patel" and nothing else reach 1.00. One such pair is a defensible
+    guess; thousands of them are bridges that chain every cluster in the
+    dataset together through connected components.
+
+    The gate asks two questions before allowing an automatic merge:
+
+    1. Was there enough to go on at all? Enough of the total feature weight
+       must have been computable.
+    2. Does anything other than the name support it? An identifier, an
+       address, a pincode, a landmark — something that distinguishes this
+       Jayesh Patel from the next one.
+
+    A pair that fails is held at ``review``, never rejected: "we cannot tell
+    from a name alone" is a question for a human, not a verdict.
+    """
+    if not weights.gate_enabled:
+        return None
+
+    # An exact match on a hard identifier settles the question by itself. A
+    # shared phone number is the distinguishing evidence the gate is asking
+    # for, so demanding a weight quorum on top of it was simply wrong: pairs
+    # like "Amit Joshi" / "અમિતભાઈ જોશી" with the same phone and no address
+    # on either side were held for review when nothing was in doubt.
+    for name in weights.gate_strong_identifiers:
+        feature = features.get(name)
+        if feature is not None and feature.value is not None and feature.value >= 0.99:
+            return None
+
+    total_weight = sum(spec.weight for spec in weights.features.values())
+    computable = sum(f.weight for f in features.values() if f.value is not None and f.weight > 0)
+    if total_weight > 0 and computable / total_weight < weights.min_evidence_weight:
+        return (
+            f"only {computable / total_weight:.0%} of the evidence could be computed "
+            f"(the gate needs {weights.min_evidence_weight:.0%}) — too little to "
+            "merge automatically"
+        )
+
+    if weights.require_non_name_support:
+        support = [
+            f
+            for name, f in features.items()
+            if not name.startswith(NAME_FEATURE_PREFIX)
+            and f.value is not None
+            and f.value >= weights.non_name_support_min
+        ]
+        if not support:
+            return (
+                "nothing outside the name supports this pair — an identical name is "
+                "not enough on its own, and millions of people share one"
+            )
+    return None
+
+
+def decide(
+    score: float,
+    weights: WeightsConfig,
+    features: dict[str, FeatureValue] | None = None,
+) -> Decision:
+    """Band the score, then apply the evidence gate to a would-be merge."""
     if score >= weights.auto_merge:
+        if features is not None and evidence_gate(features, weights):
+            return "review"
         return "merge"
     if score >= weights.review_low:
         return "review"
@@ -417,11 +542,13 @@ def score_pair(
     weights = weights or weights_config()
     features = compute_features(left, right, weights)
     score = combine(features)
+    gate = evidence_gate(features, weights) if score >= weights.auto_merge else None
     return PairScore(
         left_id=left.record_id,
         right_id=right.record_id,
         score=score,
-        decision=decide(score, weights),
+        decision=decide(score, weights, features),
         features=features,
         blocked_by=blocked_by,
+        gate=gate,
     )

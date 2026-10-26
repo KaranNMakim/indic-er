@@ -16,6 +16,7 @@ import json
 import sqlite3
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -126,6 +127,7 @@ class NetworkXGraphStore(GraphStore):
         self.validate = validate
         self.graph: nx.MultiDiGraph = nx.MultiDiGraph()
         self._conn: sqlite3.Connection | None = None
+        self._autocommit = True
         if db_path is not None:
             path = Path(db_path)
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -133,6 +135,33 @@ class NetworkXGraphStore(GraphStore):
             self._conn.executescript(_SCHEMA)
             self._conn.commit()
             self._load_from_db()
+
+    @contextmanager
+    def bulk(self):
+        """Defer SQLite commits until the block exits.
+
+        Committing per row made a 4,700-fact write take 41 seconds. One
+        transaction takes well under one. Projecting a whole resolution into
+        the graph is the only write path that matters for latency, and it is
+        naturally a single unit of work.
+        """
+        if self._conn is None:
+            yield self
+            return
+        previous = self._autocommit
+        self._autocommit = False
+        try:
+            yield self
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
+        finally:
+            self._autocommit = previous
+
+    def _maybe_commit(self) -> None:
+        if self._conn is not None and self._autocommit:
+            self._conn.commit()
 
     # ----------------------------------------------------------------- load #
 
@@ -179,7 +208,7 @@ class NetworkXGraphStore(GraphStore):
                     provenance.model_dump_json(),
                 ),
             )
-            self._conn.commit()
+            self._maybe_commit()
 
     def add_edge(
         self,
@@ -230,14 +259,14 @@ class NetworkXGraphStore(GraphStore):
                     provenance.model_dump_json(),
                 ),
             )
-            self._conn.commit()
+            self._maybe_commit()
 
     def clear(self) -> None:
         self.graph.clear()
         if self._conn is not None:
             self._conn.execute("DELETE FROM nodes")
             self._conn.execute("DELETE FROM edges")
-            self._conn.commit()
+            self._maybe_commit()
 
     # ----------------------------------------------------------------- read #
 

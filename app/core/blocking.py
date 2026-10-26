@@ -8,15 +8,23 @@ exact keys and lets scoring do the expensive work only where it might matter.
 The keys are chosen so that a true match is reachable by at least one of them
 even when several fields are wrong:
 
-===========================  =========================================
-strategy                     survives
-===========================  =========================================
-``phonetic_sorted``          token reorder, spelling, honorifics
-``phonetic_first_token``     a dropped middle name
-``phonetic_token_any``       a missing or extra token on either side
-``pincode``                  a completely different name spelling
-``phone_last10``             a different name *and* a different address
-===========================  =========================================
+============================  ========================================
+strategy                      survives
+============================  ========================================
+``phonetic_sorted``           token reorder, spelling, honorifics
+``phonetic_first_token``      a dropped middle name
+``phonetic_token_any``        a missing or extra token on either side
+``phonetic_initial_sorted``   a given name reduced to an initial
+``pincode``                   a completely different name spelling
+``phone_last10``              a different name *and* a different address
+============================  ========================================
+
+``phonetic_initial_sorted`` earns its place on a measurement: "G. Pillai" and
+"Ganesan Pillai" share no full phonetic token, and ``phonetic_token_any`` is
+no help because the only token they share is the surname, whose block is
+oversized for any common surname. Keying one token down to its first letter
+and keeping the rest intact puts them together, and the same key reunites
+"Yadav P." with "Pankaj Yadav".
 
 Recall at this stage is a ceiling that scoring can never raise: a true pair
 that lands in no shared block is lost for good. ``make eval`` therefore
@@ -75,6 +83,13 @@ def record_keys(record: NormalizedRecord, strategies: tuple[str, ...]) -> list[s
     if "phonetic_token_any" in strategies:
         # Single-letter keys come from initials and match far too much.
         keys.extend(f"pt:{token}" for token in set(phonetic) if len(token) > 1)
+    if "phonetic_initial_sorted" in strategies and len(phonetic) > 1:
+        # One token reduced to its initial, the others kept whole. Generated
+        # for every token, because which one got abbreviated is not knowable
+        # in advance and Indian names reorder freely.
+        for index, token in enumerate(phonetic):
+            others = sorted(phonetic[:index] + phonetic[index + 1 :])
+            keys.append(f"si:{token[0]}-{'-'.join(others)}")
     if "pincode" in strategies and record.address and record.address.pincode:
         keys.append(f"pin:{record.address.pincode}")
     if "phone_last10" in strategies and record.phone_last10:
@@ -150,6 +165,7 @@ def candidate_pairs(
 
 STRATEGY_LABELS = {
     "ps": "phonetic_sorted",
+    "si": "phonetic_initial_sorted",
     "pf": "phonetic_first_token",
     "pt": "phonetic_token_any",
     "pin": "pincode",

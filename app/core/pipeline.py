@@ -91,7 +91,7 @@ def resolve(
         },
         "overrides_applied": sum(1 for p in pairs if p.override),
         "duplicate_rate": _duplicate_rate(len(normalized), len(outcome.entities)),
-        "splits": outcome.splits,
+        "blocked_merges": outcome.blocked_merges[:200],
         "unresolved_conflicts": outcome.unresolved_conflicts,
         "timings_ms": {
             "normalize": round((t_normalized - started) * 1000, 1),

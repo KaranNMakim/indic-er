@@ -124,22 +124,34 @@ def t_clean(_: list[str]) -> None:
     ]
     for pyc in ROOT.rglob("__pycache__"):
         targets.append(pyc)
+    locked: list[Path] = []
     for target in targets:
-        if target.is_dir():
-            shutil.rmtree(target, ignore_errors=True)
-            print(f"  removed dir  {target.relative_to(ROOT)}")
-        elif target.exists():
-            target.unlink()
-            print(f"  removed file {target.relative_to(ROOT)}")
+        try:
+            if target.is_dir():
+                shutil.rmtree(target, ignore_errors=True)
+                print(f"  removed dir  {target.relative_to(ROOT)}")
+            elif target.exists():
+                target.unlink()
+                print(f"  removed file {target.relative_to(ROOT)}")
+        except PermissionError:
+            # On Windows a running API process holds the SQLite files open.
+            # That is worth reporting, not worth crashing the task over.
+            locked.append(target)
+    if locked:
+        print("\n  still in use (stop the API and re-run `clean` to remove):")
+        for target in locked:
+            print(f"    {target.relative_to(ROOT)}")
     print("clean done")
 
 
 def t_help(_: list[str]) -> None:
+    """Show this help."""
     print(__doc__)
     width = max(len(name) for name in TARGETS)
     print("Targets:")
     for name, fn in TARGETS.items():
-        print(f"  {name.ljust(width)}  {(fn.__doc__ or '').splitlines()[0]}")
+        lines = (fn.__doc__ or "").strip().splitlines()
+        print(f"  {name.ljust(width)}  {lines[0] if lines else ''}")
 
 
 # --------------------------------------------------------------------------- #

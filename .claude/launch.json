@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "indic-er",
+      "runtimeExecutable": "py",
+      "runtimeArgs": [
+        "-m",
+        "uvicorn",
+        "app.api.main:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8141"
+      ],
+      "port": 8141
+    }
+  ]
+}

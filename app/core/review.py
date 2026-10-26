@@ -279,17 +279,17 @@ class ReviewStore:
         if not accepted:
             report["suggested_auto_merge"] = round(min(1.0, max(rejected) + 0.02), 3)
             report["note"] = (
-                f"Every one of the {len(rejected)} reviewed pairs was rejected, the "
-                f"highest at {max(rejected):.2f}. The auto-merge threshold looks too "
-                "low — raising it would cut false merges without losing a confirmed match."
+                f"{_count(len(rejected))} rejected so far, the highest scoring "
+                f"{max(rejected):.2f}. The auto-merge threshold looks too low — "
+                "raising it would cut false merges without losing a confirmed match."
             )
             return report
         if not rejected:
             report["suggested_auto_merge"] = round(max(0.0, min(accepted) - 0.02), 3)
             report["note"] = (
-                f"Every one of the {len(accepted)} reviewed pairs was accepted, the "
-                f"lowest at {min(accepted):.2f}. The auto-merge threshold looks too "
-                "high — lowering it to that point would have merged them automatically."
+                f"{_count(len(accepted))} accepted so far, the lowest scoring "
+                f"{min(accepted):.2f}. The auto-merge threshold looks too high — "
+                "lowering it to that point would have merged them automatically."
             )
             return report
 
@@ -337,6 +337,11 @@ class ReviewStore:
 
     def close(self) -> None:
         self._conn.close()
+
+
+def _count(n: int) -> str:
+    """ "1 pair" / "7 pairs" — the note is read by a human, not a log parser."""
+    return f"{n} pair{'' if n == 1 else 's'}"
 
 
 def _best_split(accepted: list[float], rejected: list[float]) -> float:

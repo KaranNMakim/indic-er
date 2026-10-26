@@ -112,11 +112,14 @@ def test_conflicts_can_be_turned_off() -> None:
 # --------------------------------------------------------------- clustering #
 
 
-def test_transitive_chain_is_split_when_the_ends_conflict() -> None:
+def test_a_transitive_chain_does_not_drag_in_a_conflicting_record() -> None:
     """The failure connected components cannot avoid on its own.
 
-    A ~ B and B ~ C both pass, so plain components merge all three — but A and
-    C have different pincodes AND different phones. The weakest link is cut.
+    A ~ B and B ~ C both pass the threshold, so plain components merge all
+    three — but A and C have different pincodes AND different phones. Edges
+    are applied strongest-first, so A~B (0.95) lands and the marginal B~C
+    (0.74) is refused, because the cluster it would create would hold
+    conflicting evidence.
     """
     weights = weights_config()
     records = norm(
@@ -131,8 +134,30 @@ def test_transitive_chain_is_split_when_the_ends_conflict() -> None:
     members = {frozenset(e.member_ids) for e in outcome.entities}
     assert frozenset({"a", "b"}) in members
     assert frozenset({"c"}) in members
-    assert outcome.splits
-    assert outcome.splits[0]["cut_edge"] == ["b", "c"]
+    assert outcome.blocked_merges
+    assert outcome.blocked_merges[0]["pair_id"] == "b::c"
+
+
+def test_the_strongest_edge_wins_the_ground_it_is_entitled_to() -> None:
+    """Edge order decides who keeps the hub, and it must be score order."""
+    weights = weights_config()
+    records = norm(
+        [
+            ("hub", "Jayesh Patel", "12 Shreeji Soc, Maninagar, Ahmedabad 380008", None),
+            (
+                "strong",
+                "Jayesh Patel",
+                "12 Shreeji Soc, Maninagar, Ahmedabad 380008",
+                "9825012345",
+            ),
+            ("weak", "Jayesh Patel", "5 Sun Apt, Bopal, Ahmedabad 380058", "9811122233"),
+        ]
+    )
+    pairs = [pair("hub", "weak", 0.75), pair("hub", "strong", 0.93)]
+    outcome = cluster_records(records, pairs, weights)
+    members = {frozenset(e.member_ids) for e in outcome.entities}
+    assert frozenset({"hub", "strong"}) in members
+    assert frozenset({"weak"}) in members
 
 
 def test_a_strong_enough_edge_survives_a_conflict() -> None:
@@ -148,7 +173,7 @@ def test_a_strong_enough_edge_survives_a_conflict() -> None:
     outcome = cluster_records(records, pairs, weights)
     assert len(outcome.entities) == 1
     assert outcome.unresolved_conflicts
-    assert "above the override threshold" in outcome.unresolved_conflicts[0]["reason"]
+    assert "override threshold" in outcome.unresolved_conflicts[0]["reason"]
 
 
 def test_a_reviewer_confirmed_edge_is_never_cut() -> None:
@@ -164,7 +189,7 @@ def test_a_reviewer_confirmed_edge_is_never_cut() -> None:
     assert len(outcome.entities) == 1
     assert outcome.entities[0].review_state == "human_confirmed"
     assert outcome.unresolved_conflicts
-    assert "confirmed by a reviewer" in outcome.unresolved_conflicts[0]["reason"]
+    assert "reviewer" in outcome.unresolved_conflicts[0]["reason"]
 
 
 def test_singletons_are_entities_too() -> None:
@@ -181,15 +206,37 @@ def test_review_and_reject_pairs_do_not_merge() -> None:
     assert len(outcome.entities) == 2
 
 
-def test_oversized_component_skips_the_conflict_check(monkeypatch) -> None:
-    import app.core.cluster as cluster_module
+def test_a_hub_cannot_chain_many_pincodes_into_one_entity() -> None:
+    """The blowup this algorithm exists to prevent.
 
-    monkeypatch.setattr(cluster_module, "MAX_CONFLICT_CHECK_SIZE", 2)
-    records = norm([(f"r{i}", "Jayesh Patel", None, None) for i in range(4)])
-    pairs = [pair("r0", f"r{i}", 0.9) for i in range(1, 4)]
+    One hub record and seven others in seven different pincodes with seven
+    different phones. Connected components would return a single entity of
+    eight — on the full dataset that failure produced one entity holding
+    4,702 records. Conflict-aware agglomeration keeps the hub with at most
+    one of them and refuses the rest.
+    """
+    rows = [
+        (f"r{i}", "Jayesh Patel", f"Loc{i}, Pune 4110{i:02d}", f"98250123{i:02d}") for i in range(8)
+    ]
+    records = norm(rows)
+    pairs = [pair("r0", f"r{i}", 0.80) for i in range(1, 8)]
     outcome = cluster_records(records, pairs, weights_config())
-    assert outcome.skipped_large_components == [4]
-    assert len(outcome.entities) == 1
+    assert outcome.blocked_merges
+    assert max(e.size for e in outcome.entities) <= 2
+    assert len(outcome.entities) >= 7
+
+
+def test_a_blocked_merge_is_explained_on_the_entity() -> None:
+    records = norm(
+        [
+            ("a", "Jayesh Patel", "12 Shreeji Soc, Maninagar, Ahmedabad 380008", "9825012345"),
+            ("b", "Jayesh Patel", "5 Sun Apt, Bopal, Ahmedabad 380058", "9811122233"),
+        ]
+    )
+    outcome = cluster_records(records, [pair("a", "b", 0.80)], weights_config())
+    assert len(outcome.entities) == 2
+    assert any(e.split_reason for e in outcome.entities)
+    assert any(e.review_state == "conflict_separated" for e in outcome.entities)
 
 
 def test_cluster_stats() -> None:
@@ -307,6 +354,50 @@ def test_build_entity_rejects_an_unknown_cluster() -> None:
 
     with pytest.raises(ValueError, match="no known records"):
         build_entity(["ghost"], {}, nx.Graph(), {})
+
+
+def test_merge_conflict_is_evaluated_against_the_union() -> None:
+    """Checking before the union is what makes a post-hoc split unnecessary."""
+    from app.core.cluster import ClusterSummary, merge_conflict
+
+    weights = weights_config()
+    left = ClusterSummary(pincodes={"380008"}, phones={"9825012345"})
+    right = ClusterSummary(pincodes={"380058"}, phones={"9811122233"})
+    assert (
+        merge_conflict(left, right, pair("a", "b", 0.8), weights) == "different_pincode_and_phone"
+    )
+    same_pin = ClusterSummary(pincodes={"380008"}, phones={"9811122233"})
+    assert (
+        merge_conflict(left, same_pin, pair("a", "b", 0.8), weights)
+        != "different_pincode_and_phone"
+    )
+
+
+def test_a_strong_enough_pair_overrides_a_blocked_merge() -> None:
+    records = norm(
+        [
+            ("a", "Jayesh Patel", "12 Shreeji Soc, Maninagar, Ahmedabad 380008", "9825012345"),
+            ("b", "Jayesh Patel", "12 Shreeji Soc, Maninagar, Ahmedabad 380058", "9811122233"),
+        ]
+    )
+    outcome = cluster_records(records, [pair("a", "b", 0.96)], weights_config())
+    assert len(outcome.entities) == 1
+    assert outcome.unresolved_conflicts
+    assert "override threshold" in outcome.unresolved_conflicts[0]["reason"]
+
+
+def test_union_find_is_order_independent() -> None:
+    from app.core.cluster import _UnionFind
+
+    forward = _UnionFind(["a", "b", "c"])
+    forward.union("a", "b")
+    forward.union("b", "c")
+    backward = _UnionFind(["a", "b", "c"])
+    backward.union("c", "b")
+    backward.union("b", "a")
+    # The root key is an internal detail; the grouping is what must match, and
+    # entity ids are derived from the sorted members, not from the root.
+    assert sorted(forward.groups().values()) == sorted(backward.groups().values())
 
 
 def test_entity_to_dict_is_json_safe() -> None:

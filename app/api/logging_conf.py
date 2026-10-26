@@ -13,8 +13,7 @@ import time
 from typing import Any
 
 _RESERVED = frozenset(
-    vars(logging.LogRecord("", 0, "", 0, "", (), None)).keys()
-    | {"message", "asctime", "taskName"}
+    vars(logging.LogRecord("", 0, "", 0, "", (), None)).keys() | {"message", "asctime", "taskName"}
 )
 
 
@@ -42,9 +41,7 @@ class TextFormatter(logging.Formatter):
             f"{record.levelname:<7} {record.name:<28} {record.getMessage()}"
         )
         extras = {
-            k: v
-            for k, v in record.__dict__.items()
-            if k not in _RESERVED and not k.startswith("_")
+            k: v for k, v in record.__dict__.items() if k not in _RESERVED and not k.startswith("_")
         }
         if extras:
             base += "  " + " ".join(f"{k}={v}" for k, v in extras.items())

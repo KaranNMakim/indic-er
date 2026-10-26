@@ -209,6 +209,7 @@ class PairScore:
     features: dict[str, FeatureValue] = field(default_factory=dict)
     blocked_by: tuple[str, ...] = ()
     override: str | None = None
+    gate: str | None = None
     explanation: str = ""
 
     @property
@@ -226,6 +227,7 @@ class PairScore:
             "features": {name: fv.to_dict() for name, fv in self.features.items()},
             "blocked_by": list(self.blocked_by),
             "override": self.override,
+            "gate": self.gate,
             "explanation": self.explanation,
         }
 

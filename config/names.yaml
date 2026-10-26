@@ -111,14 +111,19 @@ suffix_exceptions:
   - ahuja
   - bajaj
 
-# Business legal / trade suffixes. Captured into `legal_suffix`, removed from the
-# matched name: "Patel Trading Pvt Ltd" and "Patel Trading & Sons" should still
-# pair strongly on "Patel Trading", but the suffix itself is weak evidence.
+# Business **legal and structural** suffixes only. Captured into
+# `legal_suffix` and removed from the matched name, because the legal wrapper
+# is weak evidence of identity: "Patel Trading Pvt Ltd" and
+# "M/s Patel Trading & Sons" should pair strongly on "Patel Trading".
+#
+# Trade and sector words are deliberately NOT in this list — see
+# `business_sector_words` below for why.
 business_suffixes:
   - pvt ltd
   - pvt. ltd.
   - private limited
   - pvt limited
+  - public limited
   - ltd
   - limited
   - llp
@@ -127,8 +132,8 @@ business_suffixes:
   - incorporated
   - corp
   - corporation
-  - co
   - company
+  - co
   - "& co"
   - "and co"
   - "& sons"
@@ -137,13 +142,28 @@ business_suffixes:
   - "and brothers"
   - bros
   - brothers
-  - enterprise
-  - enterprises
+  - associates
+  - group
+  - "& associates"
+  - "and associates"
+
+# Sector words that stay IN the name, listed here only as documentation of a
+# decision that is easy to get wrong.
+#
+# An earlier version stripped these as suffixes, which merged "Patel Trading"
+# with "Patel Textiles" — two different businesses sharing a proprietor's
+# surname — and reduced the canonical name of a resolved business to the bare
+# word "Patel". The surname is the *least* identifying part of an Indian
+# business name, because every firm in the market is named after a family.
+# These words carry the signal; the legal wrapper above does not.
+business_sector_words:
+  - trading
+  - traders
+  - textiles
   - industries
   - industry
-  - traders
-  - trading
-  - trading company
+  - enterprise
+  - enterprises
   - agency
   - agencies
   - stores
@@ -151,28 +171,21 @@ business_suffixes:
   - emporium
   - mart
   - supermart
-  - general stores
-  - provision stores
   - kirana
-  - kirana store
-  - textiles
-  - textile mills
   - mills
   - exports
   - imports
-  - export import
   - impex
   - sales
-  - sales corporation
   - marketing
   - distributors
   - distributor
-  - associates
-  - group
   - udyog
   - vyapar
   - bhandar
-  - stores pvt ltd
+  - hardware
+  - electricals
+  - medical
 
 # Surnames so common in India that name similarity alone is near-worthless
 # evidence. The `name_rarity` feature downweights pairs whose only name
